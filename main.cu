@@ -1,16 +1,18 @@
 #include <iostream>
 #include <cuda_runtime.h>
 #include <cmath>
+#include <iomanip>
 
-// Inclusões Modulares
+// Inclusões Modulares Estritas
 #include "config/config.cuh"
 #include "initialization/initialization.cuh"
 #include "multiphase/cahn_hilliard.cuh"
 #include "Magnetismo/poisson.cuh"
 #include "boundaries/open_boundaries.cuh"
 #include "post_process/post_process.cuh"
+#include "lbm/lbm.cuh"
 
-// Tratamento de falhas na API CUDA
+// Tratamento rigoroso de falhas na API CUDA
 #define CUDA_CHECK(call) \
     do { \
         cudaError_t err = call; \
@@ -26,43 +28,31 @@
 // =========================================================
 
 void allocate_populations(LBM_Populations* p, size_t bytes) {
-    CUDA_CHECK(cudaMalloc((void**)&(p->f0), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(p->f1), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(p->f2), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(p->f3), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(p->f4), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(p->f5), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(p->f6), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(p->f7), bytes));
+    CUDA_CHECK(cudaMalloc((void**)&(p->f0), bytes)); CUDA_CHECK(cudaMalloc((void**)&(p->f1), bytes));
+    CUDA_CHECK(cudaMalloc((void**)&(p->f2), bytes)); CUDA_CHECK(cudaMalloc((void**)&(p->f3), bytes));
+    CUDA_CHECK(cudaMalloc((void**)&(p->f4), bytes)); CUDA_CHECK(cudaMalloc((void**)&(p->f5), bytes));
+    CUDA_CHECK(cudaMalloc((void**)&(p->f6), bytes)); CUDA_CHECK(cudaMalloc((void**)&(p->f7), bytes));
     CUDA_CHECK(cudaMalloc((void**)&(p->f8), bytes));
 }
 
 void allocate_macro_fields(Macro_Fields* f, size_t bytes) {
-    CUDA_CHECK(cudaMalloc((void**)&(f->phi), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(f->phi_new), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(f->mu), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(f->psi), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(f->rho), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(f->ux), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(f->uy), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(f->chi_field), bytes));
+    CUDA_CHECK(cudaMalloc((void**)&(f->phi), bytes)); CUDA_CHECK(cudaMalloc((void**)&(f->phi_new), bytes));
+    CUDA_CHECK(cudaMalloc((void**)&(f->mu), bytes));  CUDA_CHECK(cudaMalloc((void**)&(f->psi), bytes));
+    CUDA_CHECK(cudaMalloc((void**)&(f->rho), bytes)); CUDA_CHECK(cudaMalloc((void**)&(f->ux), bytes));
+    CUDA_CHECK(cudaMalloc((void**)&(f->uy), bytes));  CUDA_CHECK(cudaMalloc((void**)&(f->chi_field), bytes));
     CUDA_CHECK(cudaMalloc((void**)&(f->K_field), bytes));
 }
 
 void free_populations(LBM_Populations* p) {
-    CUDA_CHECK(cudaFree(p->f0)); CUDA_CHECK(cudaFree(p->f1));
-    CUDA_CHECK(cudaFree(p->f2)); CUDA_CHECK(cudaFree(p->f3));
-    CUDA_CHECK(cudaFree(p->f4)); CUDA_CHECK(cudaFree(p->f5));
-    CUDA_CHECK(cudaFree(p->f6)); CUDA_CHECK(cudaFree(p->f7));
-    CUDA_CHECK(cudaFree(p->f8));
+    CUDA_CHECK(cudaFree(p->f0)); CUDA_CHECK(cudaFree(p->f1)); CUDA_CHECK(cudaFree(p->f2));
+    CUDA_CHECK(cudaFree(p->f3)); CUDA_CHECK(cudaFree(p->f4)); CUDA_CHECK(cudaFree(p->f5));
+    CUDA_CHECK(cudaFree(p->f6)); CUDA_CHECK(cudaFree(p->f7)); CUDA_CHECK(cudaFree(p->f8));
 }
 
 void free_macro_fields(Macro_Fields* f) {
-    CUDA_CHECK(cudaFree(f->phi)); CUDA_CHECK(cudaFree(f->phi_new));
-    CUDA_CHECK(cudaFree(f->mu));  CUDA_CHECK(cudaFree(f->psi));
-    CUDA_CHECK(cudaFree(f->rho)); CUDA_CHECK(cudaFree(f->ux));
-    CUDA_CHECK(cudaFree(f->uy));  CUDA_CHECK(cudaFree(f->chi_field));
-    CUDA_CHECK(cudaFree(f->K_field));
+    CUDA_CHECK(cudaFree(f->phi)); CUDA_CHECK(cudaFree(f->phi_new)); CUDA_CHECK(cudaFree(f->mu));
+    CUDA_CHECK(cudaFree(f->psi)); CUDA_CHECK(cudaFree(f->rho)); CUDA_CHECK(cudaFree(f->ux));
+    CUDA_CHECK(cudaFree(f->uy));  CUDA_CHECK(cudaFree(f->chi_field)); CUDA_CHECK(cudaFree(f->K_field));
 }
 
 void swap_populations(LBM_Populations* p1, LBM_Populations* p2) {
@@ -72,153 +62,84 @@ void swap_populations(LBM_Populations* p1, LBM_Populations* p2) {
 }
 
 // =========================================================
-// KERNELS DE ACOPLAMENTO
+// DIAGNÓSTICO NUMÉRICO E EXTRAÇÃO GEOMÉTRICA
 // =========================================================
 
-__device__ inline int get_idx(int x, int y) {
-    return y * NX + x;
-}
+void check_numerical_stability() {
+    std::cout << "========================================" << std::endl;
+    std::cout << "DIAGNOSTICO DE ESTABILIDADE LBM" << std::endl;
+    std::cout << "========================================" << std::endl;
 
-__global__ void update_susceptibility_kernel(Macro_Fields fields, double chi_max) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    double cs = 1.0 / sqrt(3.0);
+    double mach = U_INLET / cs;
+    std::cout << "Numero de Mach (Inlet): " << mach;
+    if (mach > 0.1) std::cout << " [ALERTA: Risco de erro de compressibilidade no BGK]" << std::endl;
+    else std::cout << " [OK: Regime Incompressivel garantido]" << std::endl;
 
-    if (x < NX && y < NY) {
-        int idx = get_idx(x, y);
-        double phi = fields.phi[idx];
-        fields.chi_field[idx] = chi_max * 0.5 * (1.0 + phi);
+    double nu_in = (TAU_IN - 0.5) / 3.0;
+    double nu_out = (TAU_OUT - 0.5) / 3.0;
+    std::cout << "Viscosidade Cinematica (Fase 1): " << nu_in << std::endl;
+    std::cout << "Viscosidade Cinematica (Fase 2): " << nu_out << std::endl;
+
+    if (TAU_IN <= 0.5 || TAU_OUT <= 0.5) {
+        std::cerr << "ERRO FATAL: Tempo de relaxacao <= 0.5 induz viscosidade negativa." << std::endl;
+        exit(EXIT_FAILURE);
     }
+
+    double cfl_ch = (M_MOBILITY * DT_CH) / 1.0;
+    std::cout << "Numero CFL (Cahn-Hilliard): " << cfl_ch;
+    if (cfl_ch > 0.1) std::cout << " [ALERTA: Integracao Explicita de Fase pode divergir]" << std::endl;
+    else std::cout << " [OK]" << std::endl;
+
+    std::cout << "========================================\n" << std::endl;
 }
 
-// =========================================================
-// KERNEL LBM PRINCIPAL (BGK + FORÇAMENTO + STREAMING)
-// =========================================================
+void print_progress_bar(int step, int total, double omega_num, double omega_theo) {
+    float progress = (float)step / total;
+    int barWidth = 50;
 
-__global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_out, Macro_Fields fields) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    std::cout << "\r[";
+    int pos = barWidth * progress;
+    for (int i = 0; i < barWidth; ++i) {
+        if (i < pos) std::cout << "=";
+        else if (i == pos) std::cout << ">";
+        else std::cout << " ";
+    }
 
-    if (x > 0 && x < NX - 1 && y > 0 && y < NY - 1) {
-        int idx = get_idx(x, y);
+    std::cout << "] " << std::setw(3) << int(progress * 100.0) << "% "
+              << "| It: " << step
+              << " | w_num: " << std::scientific << std::setprecision(3) << omega_num
+              << " | w_theo: " << omega_theo;
+    std::cout.flush();
 
-        // 1. Tensão de Korteweg
-        double phi_c  = fields.phi[idx];
-        double phi_R  = fields.phi[get_idx(x + 1, y)];
-        double phi_L  = fields.phi[get_idx(x - 1, y)];
-        double phi_T  = fields.phi[get_idx(x, y + 1)];
-        double phi_B  = fields.phi[get_idx(x, y - 1)];
+    if (step == total) std::cout << std::endl;
+}
 
-        double dx_phi = 0.5 * (phi_R - phi_L);
-        double dy_phi = 0.5 * (phi_T - phi_B);
-        double lap_phi = phi_R + phi_L + phi_T + phi_B - 4.0 * phi_c;
+double calculate_amplitude(const double* h_phi) {
+    double x_peak = 0.0;
+    double x_valley = (double)NX;
 
-        double mu_c = 4.0 * BETA * phi_c * (phi_c * phi_c - 1.0) - KAPPA * lap_phi;
-        double Fx = mu_c * dx_phi;
-        double Fy = mu_c * dy_phi;
+    for (int y = 0; y < NY; ++y) {
+        for (int x = 1; x < NX; ++x) {
+            int idx = y * NX + x;
+            int idx_prev = y * NX + (x - 1);
 
-        // 2. Força Magnética de Kelvin
-        double psi_c = fields.psi[idx];
-        double psi_R = fields.psi[get_idx(x + 1, y)];
-        double psi_L = fields.psi[get_idx(x - 1, y)];
-        double psi_T = fields.psi[get_idx(x, y + 1)];
-        double psi_B = fields.psi[get_idx(x, y - 1)];
+            if (h_phi[idx_prev] > 0.0 && h_phi[idx] <= 0.0) {
+                // Interpolação linear sub-grid para rastreamento suave da interface
+                double w = h_phi[idx_prev] / (h_phi[idx_prev] - h_phi[idx]);
+                double x_interface = (x - 1) + w;
 
-        double psi_TR = fields.psi[get_idx(x + 1, y + 1)];
-        double psi_TL = fields.psi[get_idx(x - 1, y + 1)];
-        double psi_BR = fields.psi[get_idx(x + 1, y - 1)];
-        double psi_BL = fields.psi[get_idx(x - 1, y - 1)];
-
-        double hx = -0.5 * (psi_R - psi_L);
-        double hy = -0.5 * (psi_T - psi_B);
-        double d2psi_dx2 = psi_R - 2.0 * psi_c + psi_L;
-        double d2psi_dy2 = psi_T - 2.0 * psi_c + psi_B;
-        double d2psi_dxy = 0.25 * (psi_TR - psi_TL - psi_BR + psi_BL);
-
-        double chi = fields.chi_field[idx];
-        Fx += chi * (hx * (-d2psi_dx2) + hy * (-d2psi_dxy));
-        Fy += chi * (hx * (-d2psi_dxy) + hy * (-d2psi_dy2));
-
-        // 3. Termodinâmica e Momentos Locais
-        double S_inv = fmax(0.0, fmin(1.0, (phi_c + 1.0) * 0.5));
-        double tau = TAU_OUT + (TAU_IN - TAU_OUT) * S_inv;
-        double omega = 1.0 / tau;
-        double nu_local = (tau - 0.5) / 3.0;
-
-        double k_local = fields.K_field[idx];
-        double sigma_drag = nu_local / k_local;
-
-        double f[9];
-        f[0] = f_in.f0[idx]; f[1] = f_in.f1[idx]; f[2] = f_in.f2[idx];
-        f[3] = f_in.f3[idx]; f[4] = f_in.f4[idx]; f[5] = f_in.f5[idx];
-        f[6] = f_in.f6[idx]; f[7] = f_in.f7[idx]; f[8] = f_in.f8[idx];
-
-        double rho_l = 0.0, ux_l = 0.0, uy_l = 0.0;
-        for (int i = 0; i < 9; ++i) {
-            rho_l += f[i];
-            ux_l += f[i] * CX[i];
-            uy_l += f[i] * CY[i];
-        }
-
-        // Esquema de Guo
-        double ux_star = (ux_l + 0.5 * Fx) / rho_l;
-        double uy_star = (uy_l + 0.5 * Fy) / rho_l;
-
-        double ux_phys = ux_star / (1.0 + 0.5 * sigma_drag);
-        double uy_phys = uy_star / (1.0 + 0.5 * sigma_drag);
-        double usq = ux_phys * ux_phys + uy_phys * uy_phys;
-
-        fields.rho[idx] = rho_l;
-        fields.ux[idx]  = ux_phys;
-        fields.uy[idx]  = uy_phys;
-
-        double Fx_total = Fx - (sigma_drag * rho_l * ux_phys);
-        double Fy_total = Fy - (sigma_drag * rho_l * uy_phys);
-
-        // 4. Colisão BGK e Streaming
-        for (int i = 0; i < 9; ++i) {
-            double cu = CX[i] * ux_phys + CY[i] * uy_phys;
-            double feq = W_LBM[i] * rho_l * (1.0 + 3.0 * cu + 4.5 * cu * cu - 1.5 * usq);
-
-            double term1 = (CX[i] - ux_phys) * Fx_total + (CY[i] - uy_phys) * Fy_total;
-            double term2 = cu * (CX[i] * Fx_total + CY[i] * Fy_total);
-            double Si = W_LBM[i] * (1.0 - 0.5 * omega) * (3.0 * term1 + 9.0 * term2);
-
-            double f_post = f[i] * (1.0 - omega) + omega * feq + Si;
-
-            int be_x = x + CX[i];
-            int be_y = y + CY[i];
-
-            if (be_y >= 0 && be_y < NY) {
-                if (be_x >= 0 && be_x < NX) {
-                    int stream_idx = get_idx(be_x, be_y);
-                    if(i==0) f_out.f0[stream_idx] = f_post;
-                    else if(i==1) f_out.f1[stream_idx] = f_post;
-                    else if(i==2) f_out.f2[stream_idx] = f_post;
-                    else if(i==3) f_out.f3[stream_idx] = f_post;
-                    else if(i==4) f_out.f4[stream_idx] = f_post;
-                    else if(i==5) f_out.f5[stream_idx] = f_post;
-                    else if(i==6) f_out.f6[stream_idx] = f_post;
-                    else if(i==7) f_out.f7[stream_idx] = f_post;
-                    else if(i==8) f_out.f8[stream_idx] = f_post;
-                }
-            } else {
-                int opp = OPP[i];
-                if(opp==0) f_out.f0[idx] = f_post;
-                else if(opp==1) f_out.f1[idx] = f_post;
-                else if(opp==2) f_out.f2[idx] = f_post;
-                else if(opp==3) f_out.f3[idx] = f_post;
-                else if(opp==4) f_out.f4[idx] = f_post;
-                else if(opp==5) f_out.f5[idx] = f_post;
-                else if(opp==6) f_out.f6[idx] = f_post;
-                else if(opp==7) f_out.f7[idx] = f_post;
-                else if(opp==8) f_out.f8[idx] = f_post;
+                if (x_interface > x_peak) x_peak = x_interface;
+                if (x_interface < x_valley) x_valley = x_interface;
+                break;
             }
         }
     }
+    return (x_peak - x_valley) / 2.0;
 }
 
 // =========================================================
-// ESCOPO PRINCIPAL (HOST)
+// ESCOPO PRINCIPAL (ORQUESTRADOR HOST)
 // =========================================================
 
 int main() {
@@ -227,36 +148,32 @@ int main() {
     size_t mem_size = NUM_NODES * sizeof(double);
 
     // 1. Alocação de Memória GPU
-    std::cout << "Alocando estruturas SoA na VRAM..." << std::endl;
     allocate_populations(&d_f_in, mem_size);
     allocate_populations(&d_f_out, mem_size);
     allocate_macro_fields(&d_fields, mem_size);
 
-    // 2. Alocação de Buffers Host
-    std::cout << "Alocando Host Buffers na RAM..." << std::endl;
+    // 2. Alocação de Buffers de Extração (RAM)
     double *h_phi = (double*)malloc(mem_size);
     double *h_rho = (double*)malloc(mem_size);
     double *h_ux  = (double*)malloc(mem_size);
     double *h_uy  = (double*)malloc(mem_size);
 
     if (!h_phi || !h_rho || !h_ux || !h_uy) {
-        std::cerr << "Falha de segmentacao na RAM." << std::endl;
+        std::cerr << "Falha de segmentacao na alocacao de RAM do Host." << std::endl;
         exit(EXIT_FAILURE);
     }
 
-    // 3. Inicialização de Sistema de Arquivos
     std::string output_dir = init_post_processing();
-    std::cout << "Diretorio de saida configurado: " << output_dir << std::endl;
 
     dim3 threadsPerBlock(16, 16);
     dim3 numBlocks((NX + threadsPerBlock.x - 1) / threadsPerBlock.x,
                    (NY + threadsPerBlock.y - 1) / threadsPerBlock.y);
 
-    std::cout << "Resolvendo Problema de Valor Inicial..." << std::endl;
-    int mode_m = 1;
-    init_fields_kernel<<<numBlocks, threadsPerBlock>>>(d_f_in, d_fields, mode_m);
+    // 3. Resolução do Problema de Valor Inicial
+    init_fields_kernel<<<numBlocks, threadsPerBlock>>>(d_f_in, d_fields);
     CUDA_CHECK(cudaDeviceSynchronize());
 
+    // Espelhamento D2D para topologia de borda consistente em t=0
     CUDA_CHECK(cudaMemcpy(d_f_out.f0, d_f_in.f0, mem_size, cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaMemcpy(d_f_out.f1, d_f_in.f1, mem_size, cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaMemcpy(d_f_out.f2, d_f_in.f2, mem_size, cudaMemcpyDeviceToDevice));
@@ -267,11 +184,33 @@ int main() {
     CUDA_CHECK(cudaMemcpy(d_f_out.f7, d_f_in.f7, mem_size, cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaMemcpy(d_f_out.f8, d_f_in.f8, mem_size, cudaMemcpyDeviceToDevice));
 
+    check_numerical_stability();
+
     int max_iter = 2000;
     double chi_max = 1.2;
 
-    std::cout << "Iniciando loop de integracao temporal LBM." << std::endl;
+    // Contêineres de Rastreamento de Crescimento Numérico
+    double prev_amplitude = INITIAL_AMPLITUDE;
+    double omega_num = 0.0;
+    double omega_num_mid = 0.0;
+    double omega_num_sum = 0.0;
+    int omega_samples = 0;
 
+    // ---------------------------------------------------------
+    // RELAÇÃO DE DISPERSÃO ANALÍTICA (LSA)
+    // ---------------------------------------------------------
+    double k_wave = (2.0 * PI * MODE_M) / (double)NY;
+
+    // Termo Base Saffman-Taylor (Diferença de Viscosidade - Tensão Interfacial)
+    double omega_base = (k_wave * U_INLET * (TAU_OUT - TAU_IN) / 3.0) - (SIGMA * pow(k_wave, 3));
+
+    // [!] INSIRA AQUI O SEU TERMO MAGNÉTICO DEDUZIDO NA LSA
+    double termo_magnetico = 0.0;
+
+    double omega_theo = omega_base + termo_magnetico;
+    // ---------------------------------------------------------
+
+    // 4. Integração Numérica Temporal
     for (int t = 0; t <= max_iter; ++t) {
 
         solve_cahn_hilliard(d_fields, numBlocks, threadsPerBlock);
@@ -289,13 +228,41 @@ int main() {
 
         swap_populations(&d_f_in, &d_f_out);
 
+        // 5. I/O Assíncrono e Cálculo de Dispersão
         if (t % SNAPSHOT_STEPS == 0) {
             export_vtk(t, output_dir, d_fields, h_phi, h_rho, h_ux, h_uy);
-            std::cout << "Snapshot " << t << " extraido." << std::endl;
+
+            double current_amplitude = calculate_amplitude(h_phi);
+
+            // Avaliação Derivativa de Euler da Interface
+            if (t > 0 && current_amplitude > 0 && prev_amplitude > 0) {
+                omega_num = log(current_amplitude / prev_amplitude) / SNAPSHOT_STEPS;
+
+                // Supressão do ruído transiente (ignora os primeiros 10% do domínio temporal)
+                if (t > max_iter * 0.1) {
+                    omega_num_sum += omega_num;
+                    omega_samples++;
+                }
+            }
+            prev_amplitude = current_amplitude;
+        }
+
+        // Snapshot analítico na metade do tempo
+        if (t == max_iter / 2) {
+            omega_num_mid = omega_num;
+        }
+
+        // Tqdm refresh iterativo
+        if (t % 10 == 0 || t == max_iter) {
+            print_progress_bar(t, max_iter, omega_num, omega_theo);
         }
     }
 
-    std::cout << "Liberando recursos (Garbage Collection)..." << std::endl;
+    // 6. Fechamento e Serialização Textual
+    double omega_num_avg = (omega_samples > 0) ? (omega_num_sum / omega_samples) : 0.0;
+    write_simulation_summary(output_dir, omega_theo, omega_num_mid, omega_num_avg);
+
+    // 7. Liberação de Memória (Garbage Collection)
     free(h_phi); free(h_rho); free(h_ux); free(h_uy);
     free_populations(&d_f_in); free_populations(&d_f_out); free_macro_fields(&d_fields);
 

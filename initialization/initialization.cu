@@ -1,8 +1,7 @@
-// initialization/initialization.cu
 #include "initialization.cuh"
 #include <cmath>
 
-__global__ void init_fields_kernel(LBM_Populations f_in, Macro_Fields fields, int mode_m) {
+__global__ void init_fields_kernel(LBM_Populations f_in, Macro_Fields fields) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -13,10 +12,13 @@ __global__ void init_fields_kernel(LBM_Populations f_in, Macro_Fields fields, in
         double Hx = H0 * cos(angle_rad);
         double Hy = H0 * sin(angle_rad);
 
-        double x_center = NX * (80.0 / 500.0) + 600.0;
-        double dist = x_center + INITIAL_AMPLITUDE * cos(2.0 * PI * mode_m * y / (double)NY);
+        double x_center = (double)NX * 0.40;
+
+        // Leitura direta de INITIAL_AMPLITUDE e MODE_M do namespace de configuração
+        double dist = x_center + INITIAL_AMPLITUDE * cos(2.0 * PI * MODE_M * y / (double)NY);
 
         fields.phi[idx] = -tanh((x - dist) / (INTERFACE_WIDTH / 2.0));
+
         fields.K_field[idx] = K_0;
         fields.rho[idx] = 1.0;
         fields.ux[idx]  = 0.0;

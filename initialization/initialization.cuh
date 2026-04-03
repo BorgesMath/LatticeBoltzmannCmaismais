@@ -1,10 +1,9 @@
-// initialization/initialization.cuh
 #ifndef INITIALIZATION_CUH
 #define INITIALIZATION_CUH
 
 #include "../config/config.cuh"
 
-// Declaração do Kernel de Inicialização
-__global__ void init_fields_kernel(LBM_Populations f_in, Macro_Fields fields, int mode_m);
+// Assinatura atualizada (sem o argumento mode_m)
+__global__ void init_fields_kernel(LBM_Populations f_in, Macro_Fields fields);
 
 #endif // INITIALIZATION_CUH

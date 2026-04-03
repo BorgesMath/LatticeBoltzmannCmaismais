@@ -97,3 +97,36 @@ void export_vtk(int step, const std::string& out_dir, Macro_Fields d_fields,
         vtk.close();
     }
 }
+
+// (Mantenha as funções init_post_processing e export_vtk intactas)
+
+void write_simulation_summary(const std::string& out_dir, double omega_theo,
+                              double omega_num_mid, double omega_num_avg) {
+
+    std::ofstream config_file(out_dir + "/config_log.txt", std::ios_base::app);
+    if (config_file.is_open()) {
+        config_file << "\n========================================\n";
+        config_file << "[ANALISE DE ESTABILIDADE (LSA E NUMERICA)]\n";
+        config_file << "========================================\n\n";
+
+        config_file << "-> PREDICAO TEORICA (Saffman-Taylor + Magnetismo):\n";
+        config_file << "Taxa de Crescimento (w_theo) : " << std::scientific << omega_theo << "\n";
+
+        if (omega_theo > 0.0) {
+            config_file << "Regime Teorico Esperado      : INSTAVEL (Crescimento Viscoso)\n\n";
+        } else {
+            config_file << "Regime Teorico Esperado      : ESTAVEL (Supressao Capilar/Magnetica)\n\n";
+        }
+
+        config_file << "-> RESULTADOS NUMERICOS (Extracao LBM):\n";
+        config_file << "Taxa no Meio da Simulacao (w_mid)  : " << std::scientific << omega_num_mid << "\n";
+        config_file << "Taxa Media Assintotica (w_avg)     : " << std::scientific << omega_num_avg << "\n";
+
+        // Avaliação de convergência
+        double erro_relativo = std::abs((omega_num_avg - omega_theo) / omega_theo) * 100.0;
+        config_file << "Desvio Numerico-Teorico Medio      : " << std::fixed << std::setprecision(2) << erro_relativo << " %\n";
+
+        config_file << "========================================\n";
+        config_file.close();
+    }
+}

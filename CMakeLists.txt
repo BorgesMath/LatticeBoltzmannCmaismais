@@ -26,6 +26,7 @@ add_executable(LatticeBoltzmann
         Magnetismo/poisson.cu
         boundaries/open_boundaries.cu
         post_process/post_process.cu
+        lbm/lbm.cu
 )
 
 # Propriedades do alvo de compilação
