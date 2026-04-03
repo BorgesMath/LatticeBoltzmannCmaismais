@@ -22,15 +22,16 @@ __global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_o
     if (x < NX && y < NY) {
         int idx = get_idx(x, y);
 
-        double Fx = 0.0;
+        // Aceleração constante universal (substitui o gradiente de pressão em validações)
+        double Fx = BODY_FORCE_X;
         double Fy = 0.0;
         double phi_c = fields.phi[idx];
 
-        // Derivadas espaciais forçantes avaliadas rigorosamente no interior da malha
+        // Derivadas forçantes isoladas estritamente no interior
         if (x > 0 && x < NX - 1 && y > 0 && y < NY - 1) {
 
             // =========================================================
-            // A. FORÇA DE KORTEWEG (Isotrópica)
+            // A. FORÇA DE KORTEWEG (Estêncil Isotrópico de 9 Pontos)
             // =========================================================
             double phi_R  = fields.phi[get_idx(x + 1, y)];
             double phi_L  = fields.phi[get_idx(x - 1, y)];
@@ -47,11 +48,11 @@ __global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_o
                                             1.0 * (phi_TR + phi_TL + phi_BR + phi_BL) - 20.0 * phi_c);
 
             double mu_c = 4.0 * BETA * phi_c * (phi_c * phi_c - 1.0) - KAPPA * lap_phi;
-            Fx = mu_c * dx_phi;
-            Fy = mu_c * dy_phi;
+            Fx += mu_c * dx_phi;
+            Fy += mu_c * dy_phi;
 
             // =========================================================
-            // B. FORÇA MAGNÉTICA DE KELVIN (Isotrópica para o Campo H)
+            // B. FORÇA MAGNÉTICA DE KELVIN (Estêncil Isotrópico)
             // =========================================================
             double psi_c = fields.psi[idx];
             double psi_R = fields.psi[get_idx(x + 1, y)];
@@ -63,11 +64,9 @@ __global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_o
             double psi_BR = fields.psi[get_idx(x + 1, y - 1)];
             double psi_BL = fields.psi[get_idx(x - 1, y - 1)];
 
-            // H = -Grad(Psi) com matrizes de 9 pontos
             double hx = -(1.0 / 6.0) * (2.0 * (psi_R - psi_L) + (psi_TR + psi_BR) - (psi_TL + psi_BL));
             double hy = -(1.0 / 6.0) * (2.0 * (psi_T - psi_B) + (psi_TR + psi_TL) - (psi_BR + psi_BL));
 
-            // Derivadas de 2ª Ordem mantidas em cruz para estabilidade ortogonal simétrica
             double d2psi_dx2 = psi_R - 2.0 * psi_c + psi_L;
             double d2psi_dy2 = psi_T - 2.0 * psi_c + psi_B;
             double d2psi_dxy = 0.25 * (psi_TR - psi_TL - psi_BR + psi_BL);
@@ -100,6 +99,7 @@ __global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_o
             uy_l += f[i] * CY[i];
         }
 
+        // Correção de Guo para momento físico
         double ux_star = (ux_l + 0.5 * Fx) / rho_l;
         double uy_star = (uy_l + 0.5 * Fy) / rho_l;
 
@@ -127,9 +127,13 @@ __global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_o
             int be_x = x + CX[i];
             int be_y = y + CY[i];
 
+            // Avaliação Topológica
             if (be_y >= 0 && be_y < NY) {
-                if (be_x >= 0 && be_x < NX) {
-                    int stream_idx = get_idx(be_x, be_y);
+                if (IS_PERIODIC) {
+                    // Mapeamento Periódico de Fronteira (Validação Analítica)
+                    int stream_x = (be_x + NX) % NX;
+                    int stream_idx = get_idx(stream_x, be_y);
+
                     if(i==0) f_out.f0[stream_idx] = f_post;
                     else if(i==1) f_out.f1[stream_idx] = f_post;
                     else if(i==2) f_out.f2[stream_idx] = f_post;
@@ -139,8 +143,24 @@ __global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_o
                     else if(i==6) f_out.f6[stream_idx] = f_post;
                     else if(i==7) f_out.f7[stream_idx] = f_post;
                     else if(i==8) f_out.f8[stream_idx] = f_post;
+                } else {
+                    // Mapeamento Truncado de Fronteira Aberta (Produção)
+                    if (be_x >= 0 && be_x < NX) {
+                        int stream_idx = get_idx(be_x, be_y);
+
+                        if(i==0) f_out.f0[stream_idx] = f_post;
+                        else if(i==1) f_out.f1[stream_idx] = f_post;
+                        else if(i==2) f_out.f2[stream_idx] = f_post;
+                        else if(i==3) f_out.f3[stream_idx] = f_post;
+                        else if(i==4) f_out.f4[stream_idx] = f_post;
+                        else if(i==5) f_out.f5[stream_idx] = f_post;
+                        else if(i==6) f_out.f6[stream_idx] = f_post;
+                        else if(i==7) f_out.f7[stream_idx] = f_post;
+                        else if(i==8) f_out.f8[stream_idx] = f_post;
+                    }
                 }
             } else {
+                // Condição Ortogonal de Bounce-Back para as Paredes
                 int opp = OPP[i];
                 if(opp==0) f_out.f0[idx] = f_post;
                 else if(opp==1) f_out.f1[idx] = f_post;

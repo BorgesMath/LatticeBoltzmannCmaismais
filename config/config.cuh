@@ -4,6 +4,13 @@
 #include <cuda_runtime.h>
 
 // =========================================================
+// CONTROLE DE TOPOLOGIA E FORÇAMENTO UNIFICADO
+// =========================================================
+constexpr bool IS_PERIODIC = true; // true: Validação (Darcy), false: Produção (Saffman-Taylor)
+constexpr double BODY_FORCE_X = 1.0e-5; // Fx constante. Deixe 0.0 para Saffman-Taylor.
+
+
+// =========================================================
 // 0. CONSTANTES MATEMÁTICAS
 // =========================================================
 constexpr double PI = 3.14159265358979323846;
@@ -11,24 +18,25 @@ constexpr double PI = 3.14159265358979323846;
 // =========================================================
 // 1. PARÂMETROS DE SIMULAÇÃO E TOPOLOGIA
 // =========================================================
-constexpr int NX = 1000;
-constexpr int NY = 400;
+constexpr int NX = 200;
+constexpr int NY = 50;
 constexpr int NUM_NODES = NX * NY;
-constexpr int SNAPSHOT_STEPS = 6;
+constexpr int SNAPSHOT_STEPS = 500;
 
 // =========================================================
 // 2. HIDRODINÂMICA E CINEMÁTICA
 // =========================================================
 constexpr double TAU_IN = 1.0;
-constexpr double TAU_OUT = 3.0;
-constexpr double U_INLET = 0.1;
-constexpr double K_0 = 5000.0;
+constexpr double TAU_OUT = 1.0;
+constexpr double U_INLET = 0.01;
+constexpr double K_0 = 10.0;
+
 
 // =========================================================
 // 3. TERMODINÂMICA DE INTERFACE (CAHN-HILLIARD)
 // =========================================================
-constexpr double M_MOBILITY = 0.002;
-constexpr int CH_SUBSTEPS = 10;
+constexpr double M_MOBILITY = 0;
+constexpr int CH_SUBSTEPS = 1;
 constexpr double DT_CH = 1.0 / (double)CH_SUBSTEPS;
 
 constexpr double SIGMA = 0.0001;

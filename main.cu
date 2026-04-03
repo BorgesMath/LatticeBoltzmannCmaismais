@@ -3,7 +3,6 @@
 #include <cmath>
 #include <iomanip>
 
-// Inclusões Modulares Estritas
 #include "config/config.cuh"
 #include "initialization/initialization.cuh"
 #include "multiphase/cahn_hilliard.cuh"
@@ -12,7 +11,6 @@
 #include "post_process/post_process.cuh"
 #include "lbm/lbm.cuh"
 
-// Tratamento rigoroso de falhas na API CUDA
 #define CUDA_CHECK(call) \
     do { \
         cudaError_t err = call; \
@@ -22,10 +20,6 @@
             exit(EXIT_FAILURE); \
         } \
     } while (0)
-
-// =========================================================
-// GERENCIAMENTO DE MEMÓRIA DE VÍDEO (VRAM)
-// =========================================================
 
 void allocate_populations(LBM_Populations* p, size_t bytes) {
     CUDA_CHECK(cudaMalloc((void**)&(p->f0), bytes)); CUDA_CHECK(cudaMalloc((void**)&(p->f1), bytes));
@@ -61,10 +55,6 @@ void swap_populations(LBM_Populations* p1, LBM_Populations* p2) {
     *p2 = temp;
 }
 
-// =========================================================
-// DIAGNÓSTICO NUMÉRICO E EXTRAÇÃO GEOMÉTRICA
-// =========================================================
-
 void check_numerical_stability() {
     std::cout << "========================================" << std::endl;
     std::cout << "DIAGNOSTICO DE ESTABILIDADE LBM" << std::endl;
@@ -91,6 +81,9 @@ void check_numerical_stability() {
     if (cfl_ch > 0.1) std::cout << " [ALERTA: Integracao Explicita de Fase pode divergir]" << std::endl;
     else std::cout << " [OK]" << std::endl;
 
+    if (IS_PERIODIC) std::cout << "\n[MODO DE OPERACAO]: Validacao Monofasica Periodica Ativa." << std::endl;
+    else std::cout << "\n[MODO DE OPERACAO]: Producao Multifasica Saffman-Taylor Ativa." << std::endl;
+
     std::cout << "========================================\n" << std::endl;
 }
 
@@ -107,9 +100,9 @@ void print_progress_bar(int step, int total, double omega_num, double omega_theo
     }
 
     std::cout << "] " << std::setw(3) << int(progress * 100.0) << "% "
-              << "| It: " << step
-              << " | w_num: " << std::scientific << std::setprecision(3) << omega_num
-              << " | w_theo: " << omega_theo;
+              << "| It: " << std::setw(4) << step
+              << " | w_num: " << std::showpos << std::scientific << std::setprecision(3) << omega_num
+              << " | w_theo: " << omega_theo << std::noshowpos << "     ";
     std::cout.flush();
 
     if (step == total) std::cout << std::endl;
@@ -125,7 +118,6 @@ double calculate_amplitude(const double* h_phi) {
             int idx_prev = y * NX + (x - 1);
 
             if (h_phi[idx_prev] > 0.0 && h_phi[idx] <= 0.0) {
-                // Interpolação linear sub-grid para rastreamento suave da interface
                 double w = h_phi[idx_prev] / (h_phi[idx_prev] - h_phi[idx]);
                 double x_interface = (x - 1) + w;
 
@@ -138,21 +130,15 @@ double calculate_amplitude(const double* h_phi) {
     return (x_peak - x_valley) / 2.0;
 }
 
-// =========================================================
-// ESCOPO PRINCIPAL (ORQUESTRADOR HOST)
-// =========================================================
-
 int main() {
     LBM_Populations d_f_in, d_f_out;
     Macro_Fields d_fields;
     size_t mem_size = NUM_NODES * sizeof(double);
 
-    // 1. Alocação de Memória GPU
     allocate_populations(&d_f_in, mem_size);
     allocate_populations(&d_f_out, mem_size);
     allocate_macro_fields(&d_fields, mem_size);
 
-    // 2. Alocação de Buffers de Extração (RAM)
     double *h_phi = (double*)malloc(mem_size);
     double *h_rho = (double*)malloc(mem_size);
     double *h_ux  = (double*)malloc(mem_size);
@@ -169,11 +155,9 @@ int main() {
     dim3 numBlocks((NX + threadsPerBlock.x - 1) / threadsPerBlock.x,
                    (NY + threadsPerBlock.y - 1) / threadsPerBlock.y);
 
-    // 3. Resolução do Problema de Valor Inicial
     init_fields_kernel<<<numBlocks, threadsPerBlock>>>(d_f_in, d_fields);
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    // Espelhamento D2D para topologia de borda consistente em t=0
     CUDA_CHECK(cudaMemcpy(d_f_out.f0, d_f_in.f0, mem_size, cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaMemcpy(d_f_out.f1, d_f_in.f1, mem_size, cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaMemcpy(d_f_out.f2, d_f_in.f2, mem_size, cudaMemcpyDeviceToDevice));
@@ -186,31 +170,20 @@ int main() {
 
     check_numerical_stability();
 
-    int max_iter = 2000;
+    int max_iter = IS_PERIODIC ? 5000 : 20000;
     double chi_max = 1.2;
 
-    // Contêineres de Rastreamento de Crescimento Numérico
     double prev_amplitude = INITIAL_AMPLITUDE;
     double omega_num = 0.0;
     double omega_num_mid = 0.0;
     double omega_num_sum = 0.0;
     int omega_samples = 0;
 
-    // ---------------------------------------------------------
-    // RELAÇÃO DE DISPERSÃO ANALÍTICA (LSA)
-    // ---------------------------------------------------------
     double k_wave = (2.0 * PI * MODE_M) / (double)NY;
-
-    // Termo Base Saffman-Taylor (Diferença de Viscosidade - Tensão Interfacial)
     double omega_base = (k_wave * U_INLET * (TAU_OUT - TAU_IN) / 3.0) - (SIGMA * pow(k_wave, 3));
-
-    // [!] INSIRA AQUI O SEU TERMO MAGNÉTICO DEDUZIDO NA LSA
     double termo_magnetico = 0.0;
-
     double omega_theo = omega_base + termo_magnetico;
-    // ---------------------------------------------------------
 
-    // 4. Integração Numérica Temporal
     for (int t = 0; t <= max_iter; ++t) {
 
         solve_cahn_hilliard(d_fields, numBlocks, threadsPerBlock);
@@ -223,46 +196,43 @@ int main() {
         lbm_collide_and_stream<<<numBlocks, threadsPerBlock>>>(d_f_in, d_f_out, d_fields);
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        apply_open_boundaries(d_f_out, d_fields, NY);
-        CUDA_CHECK(cudaDeviceSynchronize());
+        if (!IS_PERIODIC) {
+            apply_open_boundaries(d_f_out, d_fields, NY);
+            CUDA_CHECK(cudaDeviceSynchronize());
+        }
 
         swap_populations(&d_f_in, &d_f_out);
 
-        // 5. I/O Assíncrono e Cálculo de Dispersão
         if (t % SNAPSHOT_STEPS == 0) {
             export_vtk(t, output_dir, d_fields, h_phi, h_rho, h_ux, h_uy);
 
-            double current_amplitude = calculate_amplitude(h_phi);
-
-            // Avaliação Derivativa de Euler da Interface
-            if (t > 0 && current_amplitude > 0 && prev_amplitude > 0) {
-                omega_num = log(current_amplitude / prev_amplitude) / SNAPSHOT_STEPS;
-
-                // Supressão do ruído transiente (ignora os primeiros 10% do domínio temporal)
-                if (t > max_iter * 0.1) {
-                    omega_num_sum += omega_num;
-                    omega_samples++;
+            if (!IS_PERIODIC) {
+                double current_amplitude = calculate_amplitude(h_phi);
+                if (t > 0 && current_amplitude > 0 && prev_amplitude > 0) {
+                    omega_num = log(current_amplitude / prev_amplitude) / SNAPSHOT_STEPS;
+                    if (t > max_iter * 0.1) {
+                        omega_num_sum += omega_num;
+                        omega_samples++;
+                    }
                 }
+                prev_amplitude = current_amplitude;
             }
-            prev_amplitude = current_amplitude;
         }
 
-        // Snapshot analítico na metade do tempo
         if (t == max_iter / 2) {
             omega_num_mid = omega_num;
         }
 
-        // Tqdm refresh iterativo
         if (t % 10 == 0 || t == max_iter) {
             print_progress_bar(t, max_iter, omega_num, omega_theo);
         }
     }
 
-    // 6. Fechamento e Serialização Textual
-    double omega_num_avg = (omega_samples > 0) ? (omega_num_sum / omega_samples) : 0.0;
-    write_simulation_summary(output_dir, omega_theo, omega_num_mid, omega_num_avg);
+    if (!IS_PERIODIC) {
+        double omega_num_avg = (omega_samples > 0) ? (omega_num_sum / omega_samples) : 0.0;
+        write_simulation_summary(output_dir, omega_theo, omega_num_mid, omega_num_avg);
+    }
 
-    // 7. Liberação de Memória (Garbage Collection)
     free(h_phi); free(h_rho); free(h_ux); free(h_uy);
     free_populations(&d_f_in); free_populations(&d_f_out); free_macro_fields(&d_fields);
 
