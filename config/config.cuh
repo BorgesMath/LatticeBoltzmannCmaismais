@@ -17,8 +17,8 @@ constexpr double PI = 3.14159265358979323846;
 // =========================================================
 // 1. PARÂMETROS DE SIMULAÇÃO E TOPOLOGIA
 // =========================================================
-constexpr int NX = 100;
-constexpr int NY = 100;
+constexpr int NX = 400;
+constexpr int NY = 400;
 constexpr int NUM_NODES = NX * NY;
 constexpr int SNAPSHOT_STEPS = 500;
 
@@ -36,17 +36,18 @@ constexpr double BODY_FORCE_X = 0; // Fx constante. Deixe 0.0 para Saffman-Taylo
 // =========================================================
 // 3. TERMODINÂMICA DE INTERFACE (CAHN-HILLIARD)
 // =========================================================
-constexpr double M_MOBILITY = 0.01;
-constexpr int CH_SUBSTEPS = 1;
-constexpr double DT_CH = 1.0 / (double)CH_SUBSTEPS;
+constexpr double M_MOBILITY = 0.002;
+constexpr int CH_SUBSTEPS = 10;
+constexpr double DT_CH = 1.0 /  (double)CH_SUBSTEPS;
 
-constexpr double SIGMA = 0.001;
-constexpr double INTERFACE_WIDTH = 3.0;
-//constexpr double BETA = 3.0 * SIGMA * INTERFACE_WIDTH / 4.0;
+constexpr double SIGMA = 0.0001;
+constexpr double INTERFACE_WIDTH = 5.0;
+//constexpr double BETA = 3.0 * (3.0 * SIGMA) / (4.0 * INTERFACE_WIDTH);
 //constexpr double KAPPA = 3.0 * SIGMA * INTERFACE_WIDTH / 8.0;
 
-constexpr double BETA = 0.005;
-constexpr double KAPPA = 0.04;
+
+constexpr double BETA = 0.000009375; // 9.375e-6
+constexpr double KAPPA = 0.0003;     // 3.0e-4
 
 // =========================================================
 // 4. MAGNETOSTÁTICA E CONTROLE DE SOLVER

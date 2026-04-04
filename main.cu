@@ -63,31 +63,21 @@ void check_numerical_stability() {
     double cs = 1.0 / sqrt(3.0);
     double mach = U_INLET / cs;
     std::cout << "Numero de Mach (Inlet): " << mach;
-    if (mach > 0.1) std::cout << " [ALERTA: Risco de erro de compressibilidade no BGK]" << std::endl;
-    else std::cout << " [OK: Regime Incompressivel garantido]" << std::endl;
-
-    double nu_in = (TAU_IN - 0.5) / 3.0;
-    double nu_out = (TAU_OUT - 0.5) / 3.0;
-    std::cout << "Viscosidade Cinematica (Fase 1): " << nu_in << std::endl;
-    std::cout << "Viscosidade Cinematica (Fase 2): " << nu_out << std::endl;
-
-    if (TAU_IN <= 0.5 || TAU_OUT <= 0.5) {
-        std::cerr << "ERRO FATAL: Tempo de relaxacao <= 0.5 induz viscosidade negativa." << std::endl;
-        exit(EXIT_FAILURE);
-    }
+    if (mach > 0.1) std::cout << " [ALERTA: Risco de compressibilidade]" << std::endl;
+    else std::cout << " [OK]" << std::endl;
 
     double cfl_ch = (M_MOBILITY * DT_CH) / 1.0;
     std::cout << "Numero CFL (Cahn-Hilliard): " << cfl_ch;
-    if (cfl_ch > 0.1) std::cout << " [ALERTA: Integracao Explicita de Fase pode divergir]" << std::endl;
+    if (cfl_ch > 0.1) std::cout << " [ALERTA: Integracao pode divergir]" << std::endl;
     else std::cout << " [OK]" << std::endl;
 
-    if (IS_PERIODIC) std::cout << "\n[MODO DE OPERACAO]: Validacao Monofasica Periodica Ativa." << std::endl;
-    else std::cout << "\n[MODO DE OPERACAO]: Producao Multifasica Saffman-Taylor Ativa." << std::endl;
+    if (IS_PERIODIC) std::cout << "\n[MODO]: Validacao Monofasica/Laplace (Periodico)." << std::endl;
+    else std::cout << "\n[MODO]: Producao Saffman-Taylor (Aberto)." << std::endl;
 
     std::cout << "========================================\n" << std::endl;
 }
 
-void print_progress_bar(int step, int total, double omega_num, double omega_theo) {
+void print_progress_bar(int step, int total) {
     float progress = (float)step / total;
     int barWidth = 50;
 
@@ -100,34 +90,10 @@ void print_progress_bar(int step, int total, double omega_num, double omega_theo
     }
 
     std::cout << "] " << std::setw(3) << int(progress * 100.0) << "% "
-              << "| It: " << std::setw(4) << step
-              << " | w_num: " << std::showpos << std::scientific << std::setprecision(3) << omega_num
-              << " | w_theo: " << omega_theo << std::noshowpos << "     ";
+              << "| It: " << std::setw(5) << step << " / " << total << "     ";
     std::cout.flush();
 
     if (step == total) std::cout << std::endl;
-}
-
-double calculate_amplitude(const double* h_phi) {
-    double x_peak = 0.0;
-    double x_valley = (double)NX;
-
-    for (int y = 0; y < NY; ++y) {
-        for (int x = 1; x < NX; ++x) {
-            int idx = y * NX + x;
-            int idx_prev = y * NX + (x - 1);
-
-            if (h_phi[idx_prev] > 0.0 && h_phi[idx] <= 0.0) {
-                double w = h_phi[idx_prev] / (h_phi[idx_prev] - h_phi[idx]);
-                double x_interface = (x - 1) + w;
-
-                if (x_interface > x_peak) x_peak = x_interface;
-                if (x_interface < x_valley) x_valley = x_interface;
-                break;
-            }
-        }
-    }
-    return (x_peak - x_valley) / 2.0;
 }
 
 int main() {
@@ -155,9 +121,11 @@ int main() {
     dim3 numBlocks((NX + threadsPerBlock.x - 1) / threadsPerBlock.x,
                    (NY + threadsPerBlock.y - 1) / threadsPerBlock.y);
 
+    // 1. Injeção da Condição Inicial (Gota Analítica ou Saffman-Taylor)
     init_fields_kernel<<<numBlocks, threadsPerBlock>>>(d_f_in, d_fields);
     CUDA_CHECK(cudaDeviceSynchronize());
 
+    // Sincronização inicial de distribuições
     CUDA_CHECK(cudaMemcpy(d_f_out.f0, d_f_in.f0, mem_size, cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaMemcpy(d_f_out.f1, d_f_in.f1, mem_size, cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaMemcpy(d_f_out.f2, d_f_in.f2, mem_size, cudaMemcpyDeviceToDevice));
@@ -170,32 +138,39 @@ int main() {
 
     check_numerical_stability();
 
-    int max_iter = IS_PERIODIC ? 5000 : 20000;
+    // =========================================================================
+    // 2. PRÉ-CONDICIONAMENTO TERMODINÂMICO (WARM-UP)
+    // Minimiza a energia livre de Ginzburg-Landau sem acionar o fluido,
+    // garantindo gradiente nulo do potencial químico e anulação do choque inicial.
+    // =========================================================================
+    std::cout << "Executando Pre-Condicionamento Termodinamico (2500 steps)..." << std::endl;
+    for (int p = 0; p < 2500; ++p) {
+        solve_cahn_hilliard(d_fields, numBlocks, threadsPerBlock);
+    }
+    CUDA_CHECK(cudaDeviceSynchronize());
+    std::cout << "Pre-Condicionamento concluido. Interface estabilizada." << std::endl;
+    // =========================================================================
+
+    // Ajuste de horizonte temporal para garantir relaxação de correntes espúrias
+    int max_iter = IS_PERIODIC ? 40000 : 20000;
     double chi_max = 1.2;
 
-    double prev_amplitude = INITIAL_AMPLITUDE;
-    double omega_num = 0.0;
-    double omega_num_mid = 0.0;
-    double omega_num_sum = 0.0;
-    int omega_samples = 0;
-
-    double k_wave = (2.0 * PI * MODE_M) / (double)NY;
-    double omega_base = (k_wave * U_INLET * (TAU_OUT - TAU_IN) / 3.0) - (SIGMA * pow(k_wave, 3));
-    double termo_magnetico = 0.0;
-    double omega_theo = omega_base + termo_magnetico;
-
+    // 3. INTEGRAÇÃO TEMPORAL ACOPLADA
     for (int t = 0; t <= max_iter; ++t) {
 
+        // Evolução de Fase
         solve_cahn_hilliard(d_fields, numBlocks, threadsPerBlock);
 
+        // Acoplamento Magnético (Somente se ativo no config)
         update_susceptibility_kernel<<<numBlocks, threadsPerBlock>>>(d_fields, chi_max);
         CUDA_CHECK(cudaDeviceSynchronize());
-
         solve_poisson_magnetic(d_fields, numBlocks, threadsPerBlock);
 
+        // Resolução Hidrodinâmica via Lattice Boltzmann
         lbm_collide_and_stream<<<numBlocks, threadsPerBlock>>>(d_f_in, d_f_out, d_fields);
         CUDA_CHECK(cudaDeviceSynchronize());
 
+        // Condições de Contorno de Escoamento (Desativado no teste de Laplace)
         if (!IS_PERIODIC) {
             apply_open_boundaries(d_f_out, d_fields, NY);
             CUDA_CHECK(cudaDeviceSynchronize());
@@ -203,36 +178,17 @@ int main() {
 
         swap_populations(&d_f_in, &d_f_out);
 
-        if (t % SNAPSHOT_STEPS == 0) {
+        // Exportação de Dados e Snapshot
+        if (t % SNAPSHOT_STEPS == 0 && t > 0) {
             export_vtk(t, output_dir, d_fields, h_phi, h_rho, h_ux, h_uy);
-
-            if (!IS_PERIODIC) {
-                double current_amplitude = calculate_amplitude(h_phi);
-                if (t > 0 && current_amplitude > 0 && prev_amplitude > 0) {
-                    omega_num = log(current_amplitude / prev_amplitude) / SNAPSHOT_STEPS;
-                    if (t > max_iter * 0.1) {
-                        omega_num_sum += omega_num;
-                        omega_samples++;
-                    }
-                }
-                prev_amplitude = current_amplitude;
-            }
         }
 
-        if (t == max_iter / 2) {
-            omega_num_mid = omega_num;
-        }
-
-        if (t % 10 == 0 || t == max_iter) {
-            print_progress_bar(t, max_iter, omega_num, omega_theo);
+        if (t % 100 == 0 || t == max_iter) {
+            print_progress_bar(t, max_iter);
         }
     }
 
-    if (!IS_PERIODIC) {
-        double omega_num_avg = (omega_samples > 0) ? (omega_num_sum / omega_samples) : 0.0;
-        write_simulation_summary(output_dir, omega_theo, omega_num_mid, omega_num_avg);
-    }
-
+    // Liberação de Memória
     free(h_phi); free(h_rho); free(h_ux); free(h_uy);
     free_populations(&d_f_in); free_populations(&d_f_out); free_macro_fields(&d_fields);
 

@@ -6,8 +6,9 @@ import os
 
 
 # No início do valida_laplace.py
-BETA = 0.01   # INSIRA O SEU VALOR EXATO DO config.cuh
-KAPPA = 0.02  # INSIRA O SEU VALOR EXATO DO config.cuh
+# No topo do valida_laplace.py
+BETA = 0.000009375
+KAPPA = 0.0003
 
 # Cálculo analítico rigoroso de Cahn-Hilliard
 W_interface = np.sqrt(KAPPA / (2.0 * BETA))

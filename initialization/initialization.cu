@@ -8,22 +8,18 @@ __global__ void init_fields_kernel(LBM_Populations f_in, Macro_Fields fields) {
     if (x < NX && y < NY) {
         int idx = y * NX + x;
 
-        // Geometria da Gota Estática
+
+
+        // Dentro do init_fields_kernel
         double xc = NX / 2.0;
         double yc = NY / 2.0;
-        double R0 = 20.0;
+        double R0 = 50.0;
 
-        double dist = sqrt((x - xc) * (x - xc) + (y - yc) * (y - yc));
+        double r = sqrt((x - xc) * (x - xc) + (y - yc) * (y - yc));
 
-        // Espessura numérica extraída diretamente da álgebra configurada
+        // Espessura rigorosa W = 4.0 extraída da termodinâmica
         double W_interface = sqrt(KAPPA / (2.0 * BETA));
-
-        // Injeção do perfil de equilíbrio termodinâmico de energia mínima
-        fields.phi[idx] = -tanh((dist - R0) / W_interface);
-
-
-
-
+        fields.phi[idx] = -tanh((r - R0) / W_interface);
 
 
 
