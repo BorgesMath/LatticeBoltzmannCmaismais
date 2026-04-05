@@ -11,8 +11,8 @@ constexpr double PI = 3.14159265358979323846;
 // =========================================================
 // 1. PARÂMETROS DE SIMULAÇÃO E TOPOLOGIA
 // =========================================================
-constexpr int NX = 1000;
-constexpr int NY = 400;
+constexpr int NX = 14400;
+constexpr int NY = 2400;
 constexpr int NUM_NODES = NX * NY;
 constexpr int SNAPSHOT_STEPS = 6;
 
@@ -39,7 +39,7 @@ constexpr double KAPPA = 3.0 * SIGMA * INTERFACE_WIDTH / 8.0;
 // =========================================================
 // 4. MAGNETOSTÁTICA E CONTROLE DE SOLVER
 // =========================================================
-constexpr double H0 = 0.0;
+constexpr double H0 = 0.08;
 constexpr double H_ANGLE = 0.0;
 constexpr double SOR_OMEGA = 1.85;
 constexpr int SOR_ITERATIONS = 15;
@@ -48,7 +48,7 @@ constexpr int SOR_ITERATIONS = 15;
 // 5. CONDIÇÕES INICIAIS DA PERTURBAÇÃO
 // =========================================================
 constexpr double INITIAL_AMPLITUDE = 2.0;
-constexpr int MODE_M = 4; // Modo de perturbação (Define o número de onda k)
+constexpr int MODE_M = 32; // Modo de perturbação (Define o número de onda k)
 
 // =========================================================
 // 6. TENSORES DO MODELO LBM D2Q9 (Memória Constante)

@@ -186,7 +186,7 @@ int main() {
 
     check_numerical_stability();
 
-    int max_iter = 2000;
+    int max_iter = 1000;
     double chi_max = 1.2;
 
     // Contêineres de Rastreamento de Crescimento Numérico
