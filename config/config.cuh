@@ -14,15 +14,15 @@ constexpr double PI = 3.14159265358979323846;
 constexpr int NX = 14400;
 constexpr int NY = 2400;
 constexpr int NUM_NODES = NX * NY;
-constexpr int SNAPSHOT_STEPS = 6;
+constexpr int SNAPSHOT_STEPS = 60;
 
 // =========================================================
 // 2. HIDRODINÂMICA E CINEMÁTICA
 // =========================================================
-constexpr double TAU_IN = 1.0;
+constexpr double TAU_IN = 3.0;
 constexpr double TAU_OUT = 3.0;
-constexpr double U_INLET = 0.1;
-constexpr double K_0 = 5000.0;
+constexpr double U_INLET = 0.005;
+constexpr double K_0 = 4000.0;
 
 // =========================================================
 // 3. TERMODINÂMICA DE INTERFACE (CAHN-HILLIARD)
@@ -39,7 +39,7 @@ constexpr double KAPPA = 3.0 * SIGMA * INTERFACE_WIDTH / 8.0;
 // =========================================================
 // 4. MAGNETOSTÁTICA E CONTROLE DE SOLVER
 // =========================================================
-constexpr double H0 = 0.08;
+constexpr double H0 = 0.0;
 constexpr double H_ANGLE = 0.0;
 constexpr double SOR_OMEGA = 1.85;
 constexpr int SOR_ITERATIONS = 15;
@@ -47,7 +47,7 @@ constexpr int SOR_ITERATIONS = 15;
 // =========================================================
 // 5. CONDIÇÕES INICIAIS DA PERTURBAÇÃO
 // =========================================================
-constexpr double INITIAL_AMPLITUDE = 2.0;
+constexpr double INITIAL_AMPLITUDE = 4.0;
 constexpr int MODE_M = 32; // Modo de perturbação (Define o número de onda k)
 
 // =========================================================
