@@ -1,5 +1,4 @@
 #include "initialization.cuh"
-#include <cmath>
 
 __global__ void init_fields_kernel(LBM_Populations f_in, Macro_Fields fields) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -8,16 +7,15 @@ __global__ void init_fields_kernel(LBM_Populations f_in, Macro_Fields fields) {
     if (x < NX && y < NY) {
         int idx = y * NX + x;
 
-        // Fase única: elimina forças de Korteweg e correntes espúrias
-        fields.phi[idx] = 1.0;
+        fields.phi[idx] = 1.0;        // Fase única (neutraliza Korteweg)
+        fields.K_field[idx] = K_0;    // Neutraliza Darcy
+        fields.chi_field[idx] = 0.0;  // Neutraliza Susceptibilidade
+        fields.psi[idx] = 0.0;        // Neutraliza Magnetismo
 
-        fields.K_field[idx] = K_0;
         fields.rho[idx] = 1.0;
-        fields.ux[idx]  = 0.0; // Repouso inicial
+        fields.ux[idx]  = 0.0;
         fields.uy[idx]  = 0.0;
-        fields.psi[idx] = 0.0; // Sem campo magnético
 
-        // Preenchimento do equilíbrio local
         f_in.f0[idx] = W_LBM[0];
         f_in.f1[idx] = W_LBM[1]; f_in.f2[idx] = W_LBM[2];
         f_in.f3[idx] = W_LBM[3]; f_in.f4[idx] = W_LBM[4];

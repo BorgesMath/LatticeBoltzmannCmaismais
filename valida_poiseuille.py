@@ -4,6 +4,22 @@ import matplotlib.pyplot as plt
 import glob
 import os
 
+# Configurações globais de plotagem (Padrão Acadêmico/Artigo)
+plt.rcParams.update({
+    "font.family": "serif",
+    "font.serif": ["Computer Modern Roman", "Times New Roman"],
+    "mathtext.fontset": "cm",
+    "axes.labelsize": 14,
+    "legend.fontsize": 12,
+    "xtick.labelsize": 12,
+    "ytick.labelsize": 12,
+    "axes.linewidth": 1.2,
+    "xtick.direction": "in",
+    "ytick.direction": "in",
+    "xtick.top": True,
+    "ytick.right": True
+})
+
 # Condição de Contorno Cinemática (Dirichlet) do config.cuh
 U_INLET = 0.01
 
@@ -46,7 +62,6 @@ def validate_poiseuille_incompressible():
     y_fisico = y_coords + 0.5
 
     # 2. Formulação Analítica Teórica (Modelo Incompressível)
-    # U_mean ao longo de x é estritamente igual a U_INLET
     U_max_ideal = 1.5 * U_INLET
     ux_ana = (4.0 * U_max_ideal / (H_real**2)) * y_fisico * (H_real - y_fisico)
 
@@ -71,27 +86,29 @@ def validate_poiseuille_incompressible():
     print(f"Raiz Erro Quadr. (RMSE)  : {rmse:.4e}")
     print(f"==================================================\n")
 
-    # 4. Renderização Comparativa
-    plt.figure(figsize=(8, 6))
+    # 4. Renderização Gráfica Acadêmica
+    fig, ax = plt.subplots(figsize=(6, 5)) # Proporção otimizada para colunas de artigos (IEEE/Elsevier)
 
-    plt.plot(ux_plot, y_plot, 'r-', linewidth=2,
-             label='Solução Analítica Estacionária (Poiseuille)')
+    ax.plot(ux_plot, y_plot, 'k-', linewidth=1.5,
+            label='Analytical')
 
-    plt.plot(ux_num, y_fisico, 'ko', markeredgecolor='black', markerfacecolor='none',
-             label='Dinâmica LBM (Incompressível + Half-Way)', markersize=6)
+    ax.plot(ux_num, y_fisico, 'ko', markeredgecolor='black', markerfacecolor='none',
+            label='Numerical (LBM)', markersize=6, markeredgewidth=1.2)
 
-    plt.title(f'Perfil Transversal de Momento Linear - Seção $x = {x_eval}$', fontsize=12)
-    plt.xlabel(r'Velocidade Longitudinal $u_x$ [lu]', fontsize=11)
-    plt.ylabel(r'Coordenada Física Transversal $y$ [lu]', fontsize=11)
+    # Em artigos, o título é omitido em favor do "Figure Caption" no documento LaTeX/Word.
+    ax.set_xlabel(r'Longitudinal velocity, $u_x$ [lu]')
+    ax.set_ylabel(r'Transverse coordinate, $y$ [lu]')
 
-    plt.ylim(0, H_real)
-    plt.legend(loc='best')
-    plt.grid(True, linestyle=':', alpha=0.7)
+    ax.set_ylim(0, H_real)
+    ax.set_xlim(left=0.0) # Garante que o eixo X inicie em 0
+
+    # Legenda sem bordas sólidas pesadas
+    ax.legend(loc='best', frameon=False)
 
     plt.tight_layout()
 
-    plot_path = os.path.join(os.path.dirname(vtk_file), "validacao_poiseuille_incompressivel.png")
-    plt.savefig(plot_path, dpi=300)
+    plot_path = os.path.join(os.path.dirname(vtk_file), "validacao_poiseuille_academic.png")
+    fig.savefig(plot_path, dpi=300, bbox_inches='tight')
     print(f"Gráfico de validação gerado em: {plot_path}")
 
     plt.show()
