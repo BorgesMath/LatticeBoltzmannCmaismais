@@ -170,7 +170,7 @@ int main() {
 
     check_numerical_stability();
 
-    int max_iter = IS_PERIODIC ? 5000 : 20000;
+    int max_iter = IS_PERIODIC ? 5000 : 50000;
     double chi_max = 1.2;
 
     double prev_amplitude = INITIAL_AMPLITUDE;

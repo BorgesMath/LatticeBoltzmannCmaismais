@@ -6,8 +6,8 @@
 // =========================================================
 // CONTROLE DE TOPOLOGIA E FORÇAMENTO UNIFICADO
 // =========================================================
-constexpr bool IS_PERIODIC = true; // true: Validação (Darcy), false: Produção (Saffman-Taylor)
-constexpr double BODY_FORCE_X = 1.0e-5; // Fx constante. Deixe 0.0 para Saffman-Taylor.
+constexpr bool IS_PERIODIC = false; // true: Validação (Darcy), false: Produção (Saffman-Taylor)
+constexpr double BODY_FORCE_X = 0; // Fx constante. Deixe 0.0 para Saffman-Taylor.
 
 
 // =========================================================
@@ -29,7 +29,7 @@ constexpr int SNAPSHOT_STEPS = 500;
 constexpr double TAU_IN = 1.0;
 constexpr double TAU_OUT = 1.0;
 constexpr double U_INLET = 0.01;
-constexpr double K_0 = 10.0;
+constexpr double K_0 = 1.0e9;
 
 
 // =========================================================
