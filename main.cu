@@ -66,7 +66,7 @@ int main(int argc, char* argv[]) {
     std::setlocale(LC_NUMERIC, "C");
 
     // 1. Configuração de Parâmetros Dinâmicos via Command Line
-    double K_0_val = 100000.0;     // Valor padrão
+    double K_0_val = 20.0;     // Valor padrão
     double U_inlet_val = 0.01; // Valor padrão
 
     if (argc >= 3) {
