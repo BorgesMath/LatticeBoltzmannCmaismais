@@ -12,7 +12,7 @@ constexpr int SNAPSHOT_STEPS = 500;
 
 constexpr double TAU_IN = 1.0;
 constexpr double TAU_OUT = 1.0;
-//constexpr double U_INLET = 0.001;
+// double U_INLET = 0.001;
 //constexpr double K_0 = 1.0;
 
 constexpr double SIGMA = 0.0001;

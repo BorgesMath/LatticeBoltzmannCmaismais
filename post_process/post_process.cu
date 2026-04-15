@@ -45,3 +45,11 @@ void export_vtk(int step, const std::string& out_dir, Macro_Fields d_fields, dou
         vtk.close();
     }
 }
+
+void save_metadata(const std::string& out_dir, double K, double U) {
+    std::ofstream file(out_dir + "/config.txt");
+    if (file.is_open()) {
+        file << K << "\n" << U;
+        file.close();
+    }
+}

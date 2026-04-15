@@ -2,6 +2,7 @@
 #include <cuda_runtime.h>
 #include <iomanip>
 #include <string>
+#include <clocale> // Necessário para lidar com a formatação decimal de diferentes regiões
 
 #include "config/config.cuh"
 #include "initialization/initialization.cuh"
@@ -23,7 +24,7 @@ void allocate_populations(LBM_Populations* p, size_t bytes) {
     CUDA_CHECK(cudaMalloc((void**)&(p->f8), bytes));
 }
 
-// Alocação dos campos macroscópicos (Mantendo compatibilidade com o kernel multipropósito)
+// Alocação dos campos macroscópicos
 void allocate_macro_fields(Macro_Fields* f, size_t bytes) {
     CUDA_CHECK(cudaMalloc((void**)&(f->phi), bytes));      CUDA_CHECK(cudaMalloc((void**)&(f->phi_new), bytes));
     CUDA_CHECK(cudaMalloc((void**)&(f->mu), bytes));       CUDA_CHECK(cudaMalloc((void**)&(f->psi), bytes));
@@ -61,13 +62,16 @@ void print_progress_bar(int step, int total) {
 }
 
 int main(int argc, char* argv[]) {
-    // 1. Configuração de Parâmetros Dinâmicos (Command Line Arguments)
-    double K_0_val = 10.0;     // Valor default
-    double U_inlet_val = 0.01; // Valor default
+    // Força o padrão decimal "C" (ponto em vez de vírgula) para evitar erros no std::stod
+    std::setlocale(LC_NUMERIC, "C");
+
+    // 1. Configuração de Parâmetros Dinâmicos via Command Line
+    double K_0_val = 100000.0;     // Valor padrão
+    double U_inlet_val = 0.01; // Valor padrão
 
     if (argc >= 3) {
-        K_0_val = std::stod(argv[1]);     // Primeiro argumento: Permeabilidade
-        U_inlet_val = std::stod(argv[2]); // Segundo argumento: Velocidade Inlet
+        K_0_val = std::stod(argv[1]);     // Argumento 1: Permeabilidade (ex: 50.0)
+        U_inlet_val = std::stod(argv[2]); // Argumento 2: Velocidade de entrada (ex: 0.005)
     }
 
     // 2. Preparação de Memória
@@ -83,7 +87,9 @@ int main(int argc, char* argv[]) {
     double *h_ux  = (double*)malloc(mem_size);
     double *h_uy  = (double*)malloc(mem_size);
 
+    // Inicializa o diretório e salva os metadados para o Python ler depois
     std::string output_dir = init_post_processing();
+    save_metadata(output_dir, K_0_val, U_inlet_val);
 
     // 3. Configuração da Grid GPU
     dim3 threadsPerBlock(16, 16);
@@ -95,39 +101,38 @@ int main(int argc, char* argv[]) {
 
     int max_iter = 50000;
     std::cout << "======================================================" << std::endl;
-    std::cout << " LBM SOLVER - PARAMETRIC VALIDATION" << std::endl;
-    std::cout << " Domain: " << NX << "x" << NY << " | Iterations: " << max_iter << std::endl;
-    std::cout << " Parameters -> K_0: " << K_0_val << " | U_inlet: " << U_inlet_val << std::endl;
-    std::cout << " Output: " << output_dir << std::endl;
+    std::cout << " LBM SOLVER - VALIDAÇÃO PARAMÉTRICA" << std::endl;
+    std::cout << " Domínio: " << NX << "x" << NY << " | Iterações: " << max_iter << std::endl;
+    std::cout << " Parâmetros -> K_0: " << K_0_val << " | U_inlet: " << U_inlet_val << std::endl;
+    std::cout << " Diretório: " << output_dir << std::endl;
     std::cout << "======================================================" << std::endl;
 
-    // 5. Ciclo Principal de Simulação
+    // 5. Ciclo Principal
     for (int t = 0; t <= max_iter; ++t) {
 
-        // Colisão e Propagação (Kernel Principal)
+        // Colisão e Propagação
         lbm_collide_and_stream<<<numBlocks, threadsPerBlock>>>(d_f_in, d_f_out, d_fields);
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        // Aplicação de Fronteiras Dinâmicas (Inlet com U_inlet_val)
+        // Fronteira Dinâmica
         apply_open_boundaries(d_f_out, d_fields, NY, U_inlet_val);
         CUDA_CHECK(cudaDeviceSynchronize());
 
         swap_populations(&d_f_in, &d_f_out);
 
-        // Exportação de dados VTK
+        // Exportação VTK
         if (t % SNAPSHOT_STEPS == 0) {
             export_vtk(t, output_dir, d_fields, h_rho, h_ux, h_uy);
         }
 
-        // Feedback visual
         if (t % 200 == 0 || t == max_iter) {
             print_progress_bar(t, max_iter);
         }
     }
 
-    std::cout << "\nSimulacao concluida com sucesso." << std::endl;
+    std::cout << "\nSimulação concluída." << std::endl;
 
-    // 6. Limpeza de Recursos
+    // 6. Limpeza
     free(h_rho); free(h_ux); free(h_uy);
     free_populations(&d_f_in); free_populations(&d_f_out);
     free_macro_fields(&d_fields);
