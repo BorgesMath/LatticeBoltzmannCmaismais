@@ -102,7 +102,6 @@ void export_vtk(int step, const std::string& out_dir, Macro_Fields d_fields,
 
 void write_simulation_summary(const std::string& out_dir, double omega_theo,
                               double omega_num_mid, double omega_num_avg) {
-
     std::ofstream config_file(out_dir + "/config_log.txt", std::ios_base::app);
     if (config_file.is_open()) {
         config_file << "\n========================================\n";
@@ -129,7 +128,7 @@ void write_simulation_summary(const std::string& out_dir, double omega_theo,
         config_file << "========================================\n";
         config_file.close();
     }
-
+}
     void save_metadata_laplace(const std::string& out_dir, double R0) {
         std::ofstream file(out_dir + "/config.txt");
         if (file.is_open()) {
