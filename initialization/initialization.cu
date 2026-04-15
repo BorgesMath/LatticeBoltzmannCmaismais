@@ -1,29 +1,22 @@
 #include "initialization.cuh"
 #include <cmath>
 
-__global__ void init_fields_kernel(LBM_Populations f_in, Macro_Fields fields) {
+__global__ void init_fields_kernel(LBM_Populations f_in, Macro_Fields fields, double R0_val) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x < NX && y < NY) {
         int idx = y * NX + x;
 
-
-
-        // Dentro do init_fields_kernel
+        // Geometria da Gota Estática
         double xc = NX / 2.0;
         double yc = NY / 2.0;
-        double R0 = 50.0;
+        double R0 = R0_val; // Raio dinâmico injetado via orquestrador
 
-        double r = sqrt((x - xc) * (x - xc) + (y - yc) * (y - yc));
-
-        // Espessura rigorosa W = 4.0 extraída da termodinâmica
+        double dist = sqrt((x - xc) * (x - xc) + (y - yc) * (y - yc));
         double W_interface = sqrt(KAPPA / (2.0 * BETA));
-        fields.phi[idx] = -tanh((r - R0) / W_interface);
 
-
-
-
+        fields.phi[idx] = -tanh((dist - R0) / W_interface);
 
         fields.K_field[idx] = K_0;
         fields.rho[idx] = 1.0;

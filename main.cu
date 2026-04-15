@@ -2,6 +2,8 @@
 #include <cuda_runtime.h>
 #include <cmath>
 #include <iomanip>
+#include <string>
+#include <clocale> // Necessário para evitar o erro da vírgula no Brasil
 
 #include "config/config.cuh"
 #include "initialization/initialization.cuh"
@@ -55,28 +57,6 @@ void swap_populations(LBM_Populations* p1, LBM_Populations* p2) {
     *p2 = temp;
 }
 
-void check_numerical_stability() {
-    std::cout << "========================================" << std::endl;
-    std::cout << "DIAGNOSTICO DE ESTABILIDADE LBM" << std::endl;
-    std::cout << "========================================" << std::endl;
-
-    double cs = 1.0 / sqrt(3.0);
-    double mach = U_INLET / cs;
-    std::cout << "Numero de Mach (Inlet): " << mach;
-    if (mach > 0.1) std::cout << " [ALERTA: Risco de compressibilidade]" << std::endl;
-    else std::cout << " [OK]" << std::endl;
-
-    double cfl_ch = (M_MOBILITY * DT_CH) / 1.0;
-    std::cout << "Numero CFL (Cahn-Hilliard): " << cfl_ch;
-    if (cfl_ch > 0.1) std::cout << " [ALERTA: Integracao pode divergir]" << std::endl;
-    else std::cout << " [OK]" << std::endl;
-
-    if (IS_PERIODIC) std::cout << "\n[MODO]: Validacao Monofasica/Laplace (Periodico)." << std::endl;
-    else std::cout << "\n[MODO]: Producao Saffman-Taylor (Aberto)." << std::endl;
-
-    std::cout << "========================================\n" << std::endl;
-}
-
 void print_progress_bar(int step, int total) {
     float progress = (float)step / total;
     int barWidth = 50;
@@ -88,15 +68,23 @@ void print_progress_bar(int step, int total) {
         else if (i == pos) std::cout << ">";
         else std::cout << " ";
     }
-
     std::cout << "] " << std::setw(3) << int(progress * 100.0) << "% "
-              << "| It: " << std::setw(5) << step << " / " << total << "     ";
+              << "| It: " << std::setw(4) << step << "     ";
     std::cout.flush();
 
     if (step == total) std::cout << std::endl;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    // Força o padrão numérico internacional
+    std::setlocale(LC_NUMERIC, "C");
+
+    // Recebe o raio do terminal
+    double R0_val = 20.0;
+    if (argc >= 2) {
+        R0_val = std::stod(argv[1]);
+    }
+
     LBM_Populations d_f_in, d_f_out;
     Macro_Fields d_fields;
     size_t mem_size = NUM_NODES * sizeof(double);
@@ -110,22 +98,18 @@ int main() {
     double *h_ux  = (double*)malloc(mem_size);
     double *h_uy  = (double*)malloc(mem_size);
 
-    if (!h_phi || !h_rho || !h_ux || !h_uy) {
-        std::cerr << "Falha de segmentacao na alocacao de RAM do Host." << std::endl;
-        exit(EXIT_FAILURE);
-    }
-
     std::string output_dir = init_post_processing();
+
+    // Salva o metadado na pasta
+    save_metadata_laplace(output_dir, R0_val);
 
     dim3 threadsPerBlock(16, 16);
     dim3 numBlocks((NX + threadsPerBlock.x - 1) / threadsPerBlock.x,
                    (NY + threadsPerBlock.y - 1) / threadsPerBlock.y);
 
-    // 1. Injeção da Condição Inicial (Gota Analítica ou Saffman-Taylor)
-    init_fields_kernel<<<numBlocks, threadsPerBlock>>>(d_f_in, d_fields);
+    init_fields_kernel<<<numBlocks, threadsPerBlock>>>(d_f_in, d_fields, R0_val);
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    // Sincronização inicial de distribuições
     CUDA_CHECK(cudaMemcpy(d_f_out.f0, d_f_in.f0, mem_size, cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaMemcpy(d_f_out.f1, d_f_in.f1, mem_size, cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaMemcpy(d_f_out.f2, d_f_in.f2, mem_size, cudaMemcpyDeviceToDevice));
@@ -136,41 +120,21 @@ int main() {
     CUDA_CHECK(cudaMemcpy(d_f_out.f7, d_f_in.f7, mem_size, cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaMemcpy(d_f_out.f8, d_f_in.f8, mem_size, cudaMemcpyDeviceToDevice));
 
-    check_numerical_stability();
-
-    // =========================================================================
-    // 2. PRÉ-CONDICIONAMENTO TERMODINÂMICO (WARM-UP)
-    // Minimiza a energia livre de Ginzburg-Landau sem acionar o fluido,
-    // garantindo gradiente nulo do potencial químico e anulação do choque inicial.
-    // =========================================================================
-    std::cout << "Executando Pre-Condicionamento Termodinamico (2500 steps)..." << std::endl;
-    for (int p = 0; p < 2500; ++p) {
-        solve_cahn_hilliard(d_fields, numBlocks, threadsPerBlock);
-    }
-    CUDA_CHECK(cudaDeviceSynchronize());
-    std::cout << "Pre-Condicionamento concluido. Interface estabilizada." << std::endl;
-    // =========================================================================
-
-    // Ajuste de horizonte temporal para garantir relaxação de correntes espúrias
-    int max_iter = IS_PERIODIC ? 40000 : 20000;
+    int max_iter = 5000; // Suficiente para gota relaxar
     double chi_max = 1.2;
 
-    // 3. INTEGRAÇÃO TEMPORAL ACOPLADA
+    std::cout << "-> Laplace LBM | R0: " << R0_val << " | " << output_dir << std::endl;
+
     for (int t = 0; t <= max_iter; ++t) {
 
-        // Evolução de Fase
         solve_cahn_hilliard(d_fields, numBlocks, threadsPerBlock);
-
-        // Acoplamento Magnético (Somente se ativo no config)
         update_susceptibility_kernel<<<numBlocks, threadsPerBlock>>>(d_fields, chi_max);
         CUDA_CHECK(cudaDeviceSynchronize());
         solve_poisson_magnetic(d_fields, numBlocks, threadsPerBlock);
 
-        // Resolução Hidrodinâmica via Lattice Boltzmann
         lbm_collide_and_stream<<<numBlocks, threadsPerBlock>>>(d_f_in, d_f_out, d_fields);
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        // Condições de Contorno de Escoamento (Desativado no teste de Laplace)
         if (!IS_PERIODIC) {
             apply_open_boundaries(d_f_out, d_fields, NY);
             CUDA_CHECK(cudaDeviceSynchronize());
@@ -178,17 +142,14 @@ int main() {
 
         swap_populations(&d_f_in, &d_f_out);
 
-        // Exportação de Dados e Snapshot
-        if (t % SNAPSHOT_STEPS == 0 && t > 0) {
+        if (t % SNAPSHOT_STEPS == 0) {
             export_vtk(t, output_dir, d_fields, h_phi, h_rho, h_ux, h_uy);
         }
-
         if (t % 100 == 0 || t == max_iter) {
             print_progress_bar(t, max_iter);
         }
     }
 
-    // Liberação de Memória
     free(h_phi); free(h_rho); free(h_ux); free(h_uy);
     free_populations(&d_f_in); free_populations(&d_f_out); free_macro_fields(&d_fields);
 

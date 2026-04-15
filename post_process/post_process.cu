@@ -129,4 +129,11 @@ void write_simulation_summary(const std::string& out_dir, double omega_theo,
         config_file << "========================================\n";
         config_file.close();
     }
+
+    void save_metadata_laplace(const std::string& out_dir, double R0) {
+        std::ofstream file(out_dir + "/config.txt");
+        if (file.is_open()) {
+            file << R0 << "\n";
+            file.close();
+        }
 }
