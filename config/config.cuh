@@ -2,8 +2,8 @@
 #define CONFIG_CUH
 #include <cuda_runtime.h>
 
-constexpr bool IS_PERIODIC = false; // Fronteiras Abertas para Poiseuille
-constexpr double BODY_FORCE_X = 0.0; // Escoamento movido a pressao (Inlet)
+constexpr bool IS_PERIODIC = false;
+constexpr double BODY_FORCE_X = 0.0;
 
 constexpr int NX = 200;
 constexpr int NY = 50;
@@ -12,10 +12,9 @@ constexpr int SNAPSHOT_STEPS = 500;
 
 constexpr double TAU_IN = 1.0;
 constexpr double TAU_OUT = 1.0;
-constexpr double U_INLET = 0.01;
-constexpr double K_0 = 1.0e9; // Permeabilidade infinita (Desativa Darcy)
+//constexpr double U_INLET = 0.001;
+//constexpr double K_0 = 1.0;
 
-// Constantes mantidas estritamente para compilar o lbm.cu (Forças Neutras)
 constexpr double SIGMA = 0.0001;
 constexpr double INTERFACE_WIDTH = 3.0;
 constexpr double BETA = 3.0 * SIGMA * INTERFACE_WIDTH / 4.0;
@@ -30,7 +29,6 @@ struct LBM_Populations {
     double *f0, *f1, *f2, *f3, *f4, *f5, *f6, *f7, *f8;
 };
 
-// Mantemos todos os ponteiros para o lbm_collide_and_stream não quebrar
 struct Macro_Fields {
     double *phi, *phi_new, *mu;
     double *psi, *rho, *ux, *uy, *chi_field, *K_field;

@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cuda_runtime.h>
 #include <iomanip>
+#include <string>
 
 #include "config/config.cuh"
 #include "initialization/initialization.cuh"
@@ -8,10 +9,12 @@
 #include "post_process/post_process.cuh"
 #include "lbm/lbm.cuh"
 
+// Macro para verificação de erros CUDA
 #define CUDA_CHECK(call) \
     do { cudaError_t err = call; if (err != cudaSuccess) { \
-        std::cerr << "Erro CUDA: " << cudaGetErrorString(err) << std::endl; exit(EXIT_FAILURE); } } while (0)
+        std::cerr << "Erro CUDA em " << __FILE__ << ":" << __LINE__ << " -> " << cudaGetErrorString(err) << std::endl; exit(EXIT_FAILURE); } } while (0)
 
+// Alocação das populações do reticulado
 void allocate_populations(LBM_Populations* p, size_t bytes) {
     CUDA_CHECK(cudaMalloc((void**)&(p->f0), bytes)); CUDA_CHECK(cudaMalloc((void**)&(p->f1), bytes));
     CUDA_CHECK(cudaMalloc((void**)&(p->f2), bytes)); CUDA_CHECK(cudaMalloc((void**)&(p->f3), bytes));
@@ -20,24 +23,23 @@ void allocate_populations(LBM_Populations* p, size_t bytes) {
     CUDA_CHECK(cudaMalloc((void**)&(p->f8), bytes));
 }
 
+// Alocação dos campos macroscópicos (Mantendo compatibilidade com o kernel multipropósito)
 void allocate_macro_fields(Macro_Fields* f, size_t bytes) {
-    CUDA_CHECK(cudaMalloc((void**)&(f->phi), bytes)); CUDA_CHECK(cudaMalloc((void**)&(f->phi_new), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(f->mu), bytes));  CUDA_CHECK(cudaMalloc((void**)&(f->psi), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(f->rho), bytes)); CUDA_CHECK(cudaMalloc((void**)&(f->ux), bytes));
-    CUDA_CHECK(cudaMalloc((void**)&(f->uy), bytes));  CUDA_CHECK(cudaMalloc((void**)&(f->chi_field), bytes));
+    CUDA_CHECK(cudaMalloc((void**)&(f->phi), bytes));      CUDA_CHECK(cudaMalloc((void**)&(f->phi_new), bytes));
+    CUDA_CHECK(cudaMalloc((void**)&(f->mu), bytes));       CUDA_CHECK(cudaMalloc((void**)&(f->psi), bytes));
+    CUDA_CHECK(cudaMalloc((void**)&(f->rho), bytes));      CUDA_CHECK(cudaMalloc((void**)&(f->ux), bytes));
+    CUDA_CHECK(cudaMalloc((void**)&(f->uy), bytes));       CUDA_CHECK(cudaMalloc((void**)&(f->chi_field), bytes));
     CUDA_CHECK(cudaMalloc((void**)&(f->K_field), bytes));
 }
 
 void free_populations(LBM_Populations* p) {
-    CUDA_CHECK(cudaFree(p->f0)); CUDA_CHECK(cudaFree(p->f1)); CUDA_CHECK(cudaFree(p->f2));
-    CUDA_CHECK(cudaFree(p->f3)); CUDA_CHECK(cudaFree(p->f4)); CUDA_CHECK(cudaFree(p->f5));
-    CUDA_CHECK(cudaFree(p->f6)); CUDA_CHECK(cudaFree(p->f7)); CUDA_CHECK(cudaFree(p->f8));
+    cudaFree(p->f0); cudaFree(p->f1); cudaFree(p->f2); cudaFree(p->f3);
+    cudaFree(p->f4); cudaFree(p->f5); cudaFree(p->f6); cudaFree(p->f7); cudaFree(p->f8);
 }
 
 void free_macro_fields(Macro_Fields* f) {
-    CUDA_CHECK(cudaFree(f->phi)); CUDA_CHECK(cudaFree(f->phi_new)); CUDA_CHECK(cudaFree(f->mu));
-    CUDA_CHECK(cudaFree(f->psi)); CUDA_CHECK(cudaFree(f->rho)); CUDA_CHECK(cudaFree(f->ux));
-    CUDA_CHECK(cudaFree(f->uy));  CUDA_CHECK(cudaFree(f->chi_field)); CUDA_CHECK(cudaFree(f->K_field));
+    cudaFree(f->phi); cudaFree(f->phi_new); cudaFree(f->mu); cudaFree(f->psi);
+    cudaFree(f->rho); cudaFree(f->ux); cudaFree(f->uy); cudaFree(f->chi_field); cudaFree(f->K_field);
 }
 
 void swap_populations(LBM_Populations* p1, LBM_Populations* p2) {
@@ -46,20 +48,29 @@ void swap_populations(LBM_Populations* p1, LBM_Populations* p2) {
 
 void print_progress_bar(int step, int total) {
     float progress = (float)step / total;
-    int barWidth = 50;
-    std::cout << "\r[";
+    int barWidth = 40;
+    std::cout << "\rProgress: [";
     int pos = barWidth * progress;
     for (int i = 0; i < barWidth; ++i) {
         if (i < pos) std::cout << "=";
         else if (i == pos) std::cout << ">";
         else std::cout << " ";
     }
-    std::cout << "] " << int(progress * 100.0) << "% | Iteracao: " << step << "  ";
+    std::cout << "] " << int(progress * 100.0) << "% (" << step << "/" << total << ")";
     std::cout.flush();
-    if (step == total) std::cout << std::endl;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    // 1. Configuração de Parâmetros Dinâmicos (Command Line Arguments)
+    double K_0_val = 10.0;     // Valor default
+    double U_inlet_val = 0.01; // Valor default
+
+    if (argc >= 3) {
+        K_0_val = std::stod(argv[1]);     // Primeiro argumento: Permeabilidade
+        U_inlet_val = std::stod(argv[2]); // Segundo argumento: Velocidade Inlet
+    }
+
+    // 2. Preparação de Memória
     LBM_Populations d_f_in, d_f_out;
     Macro_Fields d_fields;
     size_t mem_size = NUM_NODES * sizeof(double);
@@ -74,39 +85,52 @@ int main() {
 
     std::string output_dir = init_post_processing();
 
+    // 3. Configuração da Grid GPU
     dim3 threadsPerBlock(16, 16);
     dim3 numBlocks((NX + threadsPerBlock.x - 1) / threadsPerBlock.x, (NY + threadsPerBlock.y - 1) / threadsPerBlock.y);
 
-    init_fields_kernel<<<numBlocks, threadsPerBlock>>>(d_f_in, d_fields);
+    // 4. Inicialização Dinâmica
+    init_fields_kernel<<<numBlocks, threadsPerBlock>>>(d_f_in, d_fields, K_0_val);
     CUDA_CHECK(cudaDeviceSynchronize());
 
     int max_iter = 50000;
+    std::cout << "======================================================" << std::endl;
+    std::cout << " LBM SOLVER - PARAMETRIC VALIDATION" << std::endl;
+    std::cout << " Domain: " << NX << "x" << NY << " | Iterations: " << max_iter << std::endl;
+    std::cout << " Parameters -> K_0: " << K_0_val << " | U_inlet: " << U_inlet_val << std::endl;
+    std::cout << " Output: " << output_dir << std::endl;
+    std::cout << "======================================================" << std::endl;
 
-    std::cout << "Iniciando Simulacao de Poiseuille..." << std::endl;
-
+    // 5. Ciclo Principal de Simulação
     for (int t = 0; t <= max_iter; ++t) {
 
-        // Operador LBM Puro
+        // Colisão e Propagação (Kernel Principal)
         lbm_collide_and_stream<<<numBlocks, threadsPerBlock>>>(d_f_in, d_f_out, d_fields);
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        // Imposição de Fronteiras Abertas (Inlet e Outlet)
-        apply_open_boundaries(d_f_out, d_fields, NY);
+        // Aplicação de Fronteiras Dinâmicas (Inlet com U_inlet_val)
+        apply_open_boundaries(d_f_out, d_fields, NY, U_inlet_val);
         CUDA_CHECK(cudaDeviceSynchronize());
 
         swap_populations(&d_f_in, &d_f_out);
 
+        // Exportação de dados VTK
         if (t % SNAPSHOT_STEPS == 0) {
             export_vtk(t, output_dir, d_fields, h_rho, h_ux, h_uy);
         }
 
-        if (t % 100 == 0 || t == max_iter) {
+        // Feedback visual
+        if (t % 200 == 0 || t == max_iter) {
             print_progress_bar(t, max_iter);
         }
     }
 
+    std::cout << "\nSimulacao concluida com sucesso." << std::endl;
+
+    // 6. Limpeza de Recursos
     free(h_rho); free(h_ux); free(h_uy);
-    free_populations(&d_f_in); free_populations(&d_f_out); free_macro_fields(&d_fields);
+    free_populations(&d_f_in); free_populations(&d_f_out);
+    free_macro_fields(&d_fields);
 
     return 0;
 }
