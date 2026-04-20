@@ -1,43 +1,34 @@
-// initialization/initialization.cu
 #include "initialization.cuh"
 #include <cmath>
 
-__global__ void init_fields_kernel(LBM_Populations f_in, Macro_Fields fields) {
+__global__ void init_fields_kernel(LBM_Populations f_in, Macro_Fields fields, SimConfig cfg) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (x < NX && y < NY) {
-        int idx = y * NX + x;
+    if (x < cfg.NX && y < cfg.NY) {
+        int idx = y * cfg.NX + x;
 
-        // Projeção do Campo Magnético
-        double angle_rad = H_ANGLE * PI / 180.0;
-        double Hx = H0 * cos(angle_rad);
-        double Hy = H0 * sin(angle_rad);
+        double angle_rad = cfg.H_ANGLE * PI / 180.0;
+        double Hx = cfg.H0 * cos(angle_rad);
+        double Hy = cfg.H0 * sin(angle_rad);
 
-        // Perturbação de Interface Saffman-Taylor
-        double x_center = (double)NX * 0.40;
-        double dist = x_center + INITIAL_AMPLITUDE * cos(2.0 * PI * MODE_M * y / (double)NY);
+        double x_center = (double)cfg.NX * 0.40;
+        double dist = x_center + cfg.INITIAL_AMPLITUDE * cos(2.0 * PI * cfg.MODE_M * y / (double)cfg.NY);
 
-        fields.phi[idx] = -tanh((x - dist) / (INTERFACE_WIDTH / 2.0));
+        fields.phi[idx] = -tanh((x - dist) / (cfg.INTERFACE_WIDTH / 2.0));
 
-        // Constantes reológicas e momentos de ordem zero e um
-        fields.K_field[idx] = K_0;
+        fields.K_field[idx] = cfg.K_0;
         fields.rho[idx] = 1.0;
 
-        // Inicialização do campo vetorial em regime permanente
-        fields.ux[idx]  = U_INLET;
+        fields.ux[idx]  = cfg.U_INLET;
         fields.uy[idx]  = 0.0;
-        fields.psi[idx] = Hx * (NX - x) + Hy * (NY - y);
+        fields.psi[idx] = Hx * (cfg.NX - x) + Hy * (cfg.NY - y);
 
-        // Termos invariantes para o polinômio de Hermite
-        double u_sq = U_INLET * U_INLET;
+        double u_sq = cfg.U_INLET * cfg.U_INLET;
         double rho_local = 1.0;
 
-        // Inicialização cinética rigorosa via estado de equilíbrio discreto
         for (int i = 0; i < 9; ++i) {
-            // O produto escalar ci . u reduz-se a CX[i] * U_INLET pois uy = 0
-            double cu = CX[i] * U_INLET;
-
+            double cu = CX[i] * cfg.U_INLET;
             double feq = W_LBM[i] * rho_local * (1.0 + 3.0 * cu + 4.5 * cu * cu - 1.5 * u_sq);
 
             if (i == 0) f_in.f0[idx] = feq;

@@ -1,9 +1,13 @@
 #include <iostream>
+#include <fstream>
+#include <vector>
 #include <cuda_runtime.h>
 #include <cmath>
 #include <iomanip>
+#include <string>
 
-// Inclusões Modulares Estritas
+#include <nlohmann/json.hpp>
+
 #include "config/config.cuh"
 #include "initialization/initialization.cuh"
 #include "multiphase/cahn_hilliard.cuh"
@@ -12,7 +16,8 @@
 #include "post_process/post_process.cuh"
 #include "lbm/lbm.cuh"
 
-// Tratamento rigoroso de falhas na API CUDA
+using json = nlohmann::json;
+
 #define CUDA_CHECK(call) \
     do { \
         cudaError_t err = call; \
@@ -22,10 +27,6 @@
             exit(EXIT_FAILURE); \
         } \
     } while (0)
-
-// =========================================================
-// GERENCIAMENTO DE MEMÓRIA DE VÍDEO (VRAM)
-// =========================================================
 
 void allocate_populations(LBM_Populations* p, size_t bytes) {
     CUDA_CHECK(cudaMalloc((void**)&(p->f0), bytes)); CUDA_CHECK(cudaMalloc((void**)&(p->f1), bytes));
@@ -61,32 +62,28 @@ void swap_populations(LBM_Populations* p1, LBM_Populations* p2) {
     *p2 = temp;
 }
 
-// =========================================================
-// DIAGNÓSTICO NUMÉRICO E EXTRAÇÃO GEOMÉTRICA
-// =========================================================
-
-void check_numerical_stability() {
+void check_numerical_stability(const SimConfig& cfg) {
     std::cout << "========================================" << std::endl;
     std::cout << "DIAGNOSTICO DE ESTABILIDADE LBM" << std::endl;
     std::cout << "========================================" << std::endl;
 
     double cs = 1.0 / sqrt(3.0);
-    double mach = U_INLET / cs;
+    double mach = cfg.U_INLET / cs;
     std::cout << "Numero de Mach (Inlet): " << mach;
     if (mach > 0.1) std::cout << " [ALERTA: Risco de erro de compressibilidade no BGK]" << std::endl;
     else std::cout << " [OK: Regime Incompressivel garantido]" << std::endl;
 
-    double nu_in = (TAU_IN - 0.5) / 3.0;
-    double nu_out = (TAU_OUT - 0.5) / 3.0;
+    double nu_in = (cfg.TAU_IN - 0.5) / 3.0;
+    double nu_out = (cfg.TAU_OUT - 0.5) / 3.0;
     std::cout << "Viscosidade Cinematica (Fase 1): " << nu_in << std::endl;
     std::cout << "Viscosidade Cinematica (Fase 2): " << nu_out << std::endl;
 
-    if (TAU_IN <= 0.5 || TAU_OUT <= 0.5) {
+    if (cfg.TAU_IN <= 0.5 || cfg.TAU_OUT <= 0.5) {
         std::cerr << "ERRO FATAL: Tempo de relaxacao <= 0.5 induz viscosidade negativa." << std::endl;
         exit(EXIT_FAILURE);
     }
 
-    double cfl_ch = (M_MOBILITY * DT_CH) / 1.0;
+    double cfl_ch = (cfg.M_MOBILITY * cfg.DT_CH) / 1.0;
     std::cout << "Numero CFL (Cahn-Hilliard): " << cfl_ch;
     if (cfl_ch > 0.1) std::cout << " [ALERTA: Integracao Explicita de Fase pode divergir]" << std::endl;
     else std::cout << " [OK]" << std::endl;
@@ -115,17 +112,16 @@ void print_progress_bar(int step, int total, double omega_num, double omega_theo
     if (step == total) std::cout << std::endl;
 }
 
-double calculate_amplitude(const double* h_phi) {
+double calculate_amplitude(const double* h_phi, const SimConfig& cfg) {
     double x_peak = 0.0;
-    double x_valley = (double)NX;
+    double x_valley = (double)cfg.NX;
 
-    for (int y = 0; y < NY; ++y) {
-        for (int x = 1; x < NX; ++x) {
-            int idx = y * NX + x;
-            int idx_prev = y * NX + (x - 1);
+    for (int y = 0; y < cfg.NY; ++y) {
+        for (int x = 1; x < cfg.NX; ++x) {
+            int idx = y * cfg.NX + x;
+            int idx_prev = y * cfg.NX + (x - 1);
 
             if (h_phi[idx_prev] > 0.0 && h_phi[idx] <= 0.0) {
-                // Interpolação linear sub-grid para rastreamento suave da interface
                 double w = h_phi[idx_prev] / (h_phi[idx_prev] - h_phi[idx]);
                 double x_interface = (x - 1) + w;
 
@@ -138,21 +134,17 @@ double calculate_amplitude(const double* h_phi) {
     return (x_peak - x_valley) / 2.0;
 }
 
-// =========================================================
-// ESCOPO PRINCIPAL (ORQUESTRADOR HOST)
-// =========================================================
+void run_simulation_case(const SimConfig& cfg) {
+    std::cout << "\n>>> INICIANDO CASO: " << cfg.case_name << " <<<" << std::endl;
 
-int main() {
     LBM_Populations d_f_in, d_f_out;
     Macro_Fields d_fields;
-    size_t mem_size = NUM_NODES * sizeof(double);
+    size_t mem_size = cfg.NUM_NODES * sizeof(double);
 
-    // 1. Alocação de Memória GPU
     allocate_populations(&d_f_in, mem_size);
     allocate_populations(&d_f_out, mem_size);
     allocate_macro_fields(&d_fields, mem_size);
 
-    // 2. Alocação de Buffers de Extração (RAM)
     double *h_phi = (double*)malloc(mem_size);
     double *h_rho = (double*)malloc(mem_size);
     double *h_ux  = (double*)malloc(mem_size);
@@ -163,17 +155,15 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    std::string output_dir = init_post_processing();
+    std::string output_dir = init_post_processing(cfg);
 
     dim3 threadsPerBlock(16, 16);
-    dim3 numBlocks((NX + threadsPerBlock.x - 1) / threadsPerBlock.x,
-                   (NY + threadsPerBlock.y - 1) / threadsPerBlock.y);
+    dim3 numBlocks((cfg.NX + threadsPerBlock.x - 1) / threadsPerBlock.x,
+                   (cfg.NY + threadsPerBlock.y - 1) / threadsPerBlock.y);
 
-    // 3. Resolução do Problema de Valor Inicial
-    init_fields_kernel<<<numBlocks, threadsPerBlock>>>(d_f_in, d_fields);
+    init_fields_kernel<<<numBlocks, threadsPerBlock>>>(d_f_in, d_fields, cfg);
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    // Espelhamento D2D para topologia de borda consistente em t=0
     CUDA_CHECK(cudaMemcpy(d_f_out.f0, d_f_in.f0, mem_size, cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaMemcpy(d_f_out.f1, d_f_in.f1, mem_size, cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaMemcpy(d_f_out.f2, d_f_in.f2, mem_size, cudaMemcpyDeviceToDevice));
@@ -184,61 +174,42 @@ int main() {
     CUDA_CHECK(cudaMemcpy(d_f_out.f7, d_f_in.f7, mem_size, cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaMemcpy(d_f_out.f8, d_f_in.f8, mem_size, cudaMemcpyDeviceToDevice));
 
-    check_numerical_stability();
+    check_numerical_stability(cfg);
 
     int max_iter = 10000;
     double chi_max = 1.2;
 
-    // Contêineres de Rastreamento de Crescimento Numérico
-    double prev_amplitude = INITIAL_AMPLITUDE;
+    double prev_amplitude = cfg.INITIAL_AMPLITUDE;
     double omega_num = 0.0;
     double omega_num_mid = 0.0;
     double omega_num_sum = 0.0;
     int omega_samples = 0;
 
-    // ---------------------------------------------------------
-    // RELAÇÃO DE DISPERSÃO ANALÍTICA (LSA)
-    // ---------------------------------------------------------
-    double k_wave = (2.0 * PI * MODE_M) / (double)NY;
+    double k_wave = (2.0 * PI * cfg.MODE_M) / (double)cfg.NY;
+    double omega_base = (k_wave * cfg.U_INLET * (cfg.TAU_OUT - cfg.TAU_IN) / 3.0) - (cfg.SIGMA * pow(k_wave, 3));
+    double omega_theo = omega_base;
 
-    // Termo Base Saffman-Taylor (Diferença de Viscosidade - Tensão Interfacial)
-    double omega_base = (k_wave * U_INLET * (TAU_OUT - TAU_IN) / 3.0) - (SIGMA * pow(k_wave, 3));
-
-    // [!] INSIRA AQUI O SEU TERMO MAGNÉTICO DEDUZIDO NA LSA
-    double termo_magnetico = 0.0;
-
-    double omega_theo = omega_base + termo_magnetico;
-    // ---------------------------------------------------------
-
-    // 4. Integração Numérica Temporal
     for (int t = 0; t <= max_iter; ++t) {
+        // Enfileiramento direto na fila assíncrona (Stream 0) sem interrupções à CPU
+        solve_cahn_hilliard(d_fields, numBlocks, threadsPerBlock, cfg);
+        update_susceptibility_kernel<<<numBlocks, threadsPerBlock>>>(d_fields, chi_max, cfg);
+        solve_poisson_magnetic(d_fields, numBlocks, threadsPerBlock, cfg);
+        lbm_collide_and_stream<<<numBlocks, threadsPerBlock>>>(d_f_in, d_f_out, d_fields, cfg);
+        apply_open_boundaries(d_f_out, d_fields, cfg.NY, cfg);
 
-        solve_cahn_hilliard(d_fields, numBlocks, threadsPerBlock);
-
-        update_susceptibility_kernel<<<numBlocks, threadsPerBlock>>>(d_fields, chi_max);
-        CUDA_CHECK(cudaDeviceSynchronize());
-
-        solve_poisson_magnetic(d_fields, numBlocks, threadsPerBlock);
-
-        lbm_collide_and_stream<<<numBlocks, threadsPerBlock>>>(d_f_in, d_f_out, d_fields);
-        CUDA_CHECK(cudaDeviceSynchronize());
-
-        apply_open_boundaries(d_f_out, d_fields, NY);
-        CUDA_CHECK(cudaDeviceSynchronize());
-
+        // O(1) Swapping no host
         swap_populations(&d_f_in, &d_f_out);
 
-        // 5. I/O Assíncrono e Cálculo de Dispersão
-        if (t % SNAPSHOT_STEPS == 0) {
-            export_vtk(t, output_dir, d_fields, h_phi, h_rho, h_ux, h_uy);
+        // Bloqueio do barramento confinado ao snapshot
+        if (t % cfg.SNAPSHOT_STEPS == 0) {
+            // O cudaMemcpy invocado por export_vtk atuará como uma barreira de sincronização implicita,
+            // garantindo que todos os kernels pendentes até o ciclo "t" finalizem antes do dump do arquivo.
+            export_vtk(t, output_dir, d_fields, h_phi, h_rho, h_ux, h_uy, cfg);
 
-            double current_amplitude = calculate_amplitude(h_phi);
+            double current_amplitude = calculate_amplitude(h_phi, cfg);
 
-            // Avaliação Derivativa de Euler da Interface
             if (t > 0 && current_amplitude > 0 && prev_amplitude > 0) {
-                omega_num = log(current_amplitude / prev_amplitude) / SNAPSHOT_STEPS;
-
-                // Supressão do ruído transiente (ignora os primeiros 10% do domínio temporal)
+                omega_num = log(current_amplitude / prev_amplitude) / cfg.SNAPSHOT_STEPS;
                 if (t > max_iter * 0.1) {
                     omega_num_sum += omega_num;
                     omega_samples++;
@@ -247,24 +218,82 @@ int main() {
             prev_amplitude = current_amplitude;
         }
 
-        // Snapshot analítico na metade do tempo
         if (t == max_iter / 2) {
             omega_num_mid = omega_num;
         }
 
-        // Tqdm refresh iterativo
         if (t % 10 == 0 || t == max_iter) {
             print_progress_bar(t, max_iter, omega_num, omega_theo);
         }
     }
 
-    // 6. Fechamento e Serialização Textual
     double omega_num_avg = (omega_samples > 0) ? (omega_num_sum / omega_samples) : 0.0;
     write_simulation_summary(output_dir, omega_theo, omega_num_mid, omega_num_avg);
 
-    // 7. Liberação de Memória (Garbage Collection)
     free(h_phi); free(h_rho); free(h_ux); free(h_uy);
     free_populations(&d_f_in); free_populations(&d_f_out); free_macro_fields(&d_fields);
+}
 
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        std::cerr << "Falha na submissao. Uso: " << argv[0] << " <arquivo_casos.json>" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    std::ifstream file(argv[1]);
+    if (!file.is_open()) {
+        std::cerr << "ERRO FATAL: Nao foi possivel abrir o descritor de arquivo JSON: " << argv[1] << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    json j_casos;
+    file >> j_casos;
+
+    std::vector<SimConfig> batch_configs;
+
+    for (const auto& item : j_casos) {
+        SimConfig cfg;
+
+        std::string temp_name = item.value("case_name", "simulacao_default");
+        strncpy(cfg.case_name, temp_name.c_str(), sizeof(cfg.case_name) - 1);
+        cfg.case_name[sizeof(cfg.case_name) - 1] = '\0';
+
+        cfg.NX = item.at("NX");
+        cfg.NY = item.at("NY");
+        cfg.NUM_NODES = cfg.NX * cfg.NY;
+        cfg.SNAPSHOT_STEPS = item.at("SNAPSHOT_STEPS");
+
+        cfg.TAU_IN = item.at("TAU_IN");
+        cfg.TAU_OUT = item.at("TAU_OUT");
+        cfg.U_INLET = item.at("U_INLET");
+        cfg.K_0 = item.at("K_0");
+
+        cfg.M_MOBILITY = item.at("M_MOBILITY");
+        cfg.CH_SUBSTEPS = item.at("CH_SUBSTEPS");
+        cfg.DT_CH = 1.0 / (double)cfg.CH_SUBSTEPS;
+        cfg.SIGMA = item.at("SIGMA");
+        cfg.INTERFACE_WIDTH = item.at("INTERFACE_WIDTH");
+
+        cfg.BETA = 3.0 * cfg.SIGMA * cfg.INTERFACE_WIDTH / 4.0;
+        cfg.KAPPA = 3.0 * cfg.SIGMA * cfg.INTERFACE_WIDTH / 8.0;
+
+        cfg.H0 = item.at("H0");
+        cfg.H_ANGLE = item.at("H_ANGLE");
+        cfg.SOR_OMEGA = item.at("SOR_OMEGA");
+        cfg.SOR_ITERATIONS = item.at("SOR_ITERATIONS");
+
+        cfg.INITIAL_AMPLITUDE = item.at("INITIAL_AMPLITUDE");
+        cfg.MODE_M = item.at("MODE_M");
+        cfg.BODY_FORCE_X = item.at("BODY_FORCE_X");
+        cfg.IS_PERIODIC = item.at("IS_PERIODIC");
+
+        batch_configs.push_back(cfg);
+    }
+
+    for (const auto& cfg : batch_configs) {
+        run_simulation_case(cfg);
+    }
+
+    std::cout << "\n>>> EXECUCAO EM LOTE CONCLUIDA <<<" << std::endl;
     return 0;
 }

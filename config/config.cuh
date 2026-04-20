@@ -2,90 +2,52 @@
 #define CONFIG_CUH
 
 #include <cuda_runtime.h>
+#include <string>
 
-// =========================================================
-// 0. CONSTANTES MATEMÁTICAS
-// =========================================================
 constexpr double PI = 3.14159265358979323846;
 
-// =========================================================
-// 1. PARÂMETROS DE SIMULAÇÃO E TOPOLOGIA
-// =========================================================
-constexpr int NX = 4000;
-constexpr int NY = 2000;
-constexpr int NUM_NODES = NX * NY;
-constexpr int SNAPSHOT_STEPS = 60;
-
-// =========================================================
-// 2. HIDRODINÂMICA E CINEMÁTICA
-// =========================================================
-constexpr double TAU_IN = 0.6;
-constexpr double TAU_OUT = 1.5;
-constexpr double U_INLET = 0.05;
-constexpr double K_0 = 40.0;
-
-//a janela ótima de convergência e estabilidade
-//para o tempo de relaxação localiza-se no
-//intervalo $0.6 \leq \tau \leq 1.5$
-
-// =========================================================
-// 3. TERMODINÂMICA DE INTERFACE (CAHN-HILLIARD)
-// =========================================================
-constexpr double M_MOBILITY = 0.002;
-constexpr int CH_SUBSTEPS = 10;
-constexpr double DT_CH = 1.0 / (double)CH_SUBSTEPS;
-
-constexpr double SIGMA = 0.0001;
-constexpr double INTERFACE_WIDTH = 3.0;
-constexpr double BETA = 3.0 * SIGMA * INTERFACE_WIDTH / 4.0;
-constexpr double KAPPA = 3.0 * SIGMA * INTERFACE_WIDTH / 8.0;
-
-// =========================================================
-// 4. MAGNETOSTÁTICA E CONTROLE DE SOLVER
-// =========================================================
-constexpr double H0 = 0.0;
-constexpr double H_ANGLE = 0.0;
-constexpr double SOR_OMEGA = 1.85;
-constexpr int SOR_ITERATIONS = 15;
-
-// =========================================================
-// 5. CONDIÇÕES INICIAIS DA PERTURBAÇÃO
-// =========================================================
-constexpr double INITIAL_AMPLITUDE = 4.0;
-constexpr int MODE_M = 32; // Modo de perturbação (Define o número de onda k)
-
-// =========================================================
-// 6. TENSORES DO MODELO LBM D2Q9 (Memória Constante)
-// =========================================================
-// O modificador 'static' previne erros de múltipla definição no Linker (LNK2005)
-// ao incluir este cabeçalho em vários arquivos .cu simultaneamente.
 static __constant__ double W_LBM[9] = {4.0/9.0, 1.0/9.0, 1.0/9.0, 1.0/9.0, 1.0/9.0, 1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0};
 static __constant__ int CX[9] = {0, 1, 0, -1, 0, 1, -1, -1, 1};
 static __constant__ int CY[9] = {0, 0, 1, 0, -1, 1, 1, -1, -1};
 static __constant__ int OPP[9] = {0, 3, 4, 1, 2, 7, 8, 5, 6};
 
+struct SimConfig {
+    char case_name[64]; // Subsitui std::string para compatibilidade estrita POD (Plain Old Data)
+    int NX;
+    int NY;
+    int NUM_NODES;
+    int SNAPSHOT_STEPS;
 
-// =========================================================
-// 7. ESTRUTURAS DE DADOS GLOBAIS (SoA)
-// =========================================================
+    double TAU_IN;
+    double TAU_OUT;
+    double U_INLET;
+    double K_0;
+
+    double M_MOBILITY;
+    int CH_SUBSTEPS;
+    double DT_CH;
+    double SIGMA;
+    double INTERFACE_WIDTH;
+    double BETA;
+    double KAPPA;
+
+    double H0;
+    double H_ANGLE;
+    double SOR_OMEGA;
+    int SOR_ITERATIONS;
+
+    double INITIAL_AMPLITUDE;
+    int MODE_M;
+    double BODY_FORCE_X;
+    bool IS_PERIODIC;
+};
 
 struct LBM_Populations {
     double *f0, *f1, *f2, *f3, *f4, *f5, *f6, *f7, *f8;
 };
 
 struct Macro_Fields {
-    // Campos do Cahn-Hilliard rigorosamente declarados aqui:
-    double *phi, *phi_new, *mu;
-
-    // Campos Macro e Magnetostática:
-    double *psi, *rho, *ux, *uy, *chi_field, *K_field;
+    double *phi, *phi_new, *mu, *psi, *rho, *ux, *uy, *chi_field, *K_field;
 };
-
-
-// =========================================================
-// 8. CONTROLE TOPOLÓGICO E FORÇAMENTO EXTERNO
-// =========================================================
-constexpr double BODY_FORCE_X = 0.0; // Aceleração universal de volume (0.0 se forçado apenas via Inlet/Dirichlet)
-constexpr bool IS_PERIODIC = true;   // true para topologia de malha periódica (validação LSA), false para domínio truncado
 
 #endif // CONFIG_CUH

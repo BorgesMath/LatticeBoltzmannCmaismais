@@ -1,68 +1,60 @@
 #include "lbm.cuh"
 #include <cmath>
 
-__device__ inline int get_idx(int x, int y) {
-    return y * NX + x;
+__device__ inline int get_idx(int x, int y, int NX_dim) {
+    return y * NX_dim + x;
 }
 
-__global__ void update_susceptibility_kernel(Macro_Fields fields, double chi_max) {
+__global__ void update_susceptibility_kernel(Macro_Fields fields, double chi_max, SimConfig cfg) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (x < NX && y < NY) {
-        int idx = get_idx(x, y);
+    if (x < cfg.NX && y < cfg.NY) {
+        int idx = get_idx(x, y, cfg.NX);
         fields.chi_field[idx] = chi_max * 0.5 * (1.0 + fields.phi[idx]);
     }
 }
 
-__global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_out, Macro_Fields fields) {
+__global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_out, Macro_Fields fields, SimConfig cfg) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (x < NX && y < NY) {
-        int idx = get_idx(x, y);
+    if (x < cfg.NX && y < cfg.NY) {
+        int idx = get_idx(x, y, cfg.NX);
 
-        // Aceleração constante universal (substitui o gradiente de pressão em validações)
-        double Fx = BODY_FORCE_X;
+        double Fx = cfg.BODY_FORCE_X;
         double Fy = 0.0;
         double phi_c = fields.phi[idx];
 
-        // Derivadas forçantes isoladas estritamente no interior
-        if (x > 0 && x < NX - 1 && y > 0 && y < NY - 1) {
+        if (x > 0 && x < cfg.NX - 1 && y > 0 && y < cfg.NY - 1) {
 
-            // =========================================================
-            // A. FORÇA DE KORTEWEG (Estêncil Isotrópico de 9 Pontos)
-            // =========================================================
-            double phi_R  = fields.phi[get_idx(x + 1, y)];
-            double phi_L  = fields.phi[get_idx(x - 1, y)];
-            double phi_T  = fields.phi[get_idx(x, y + 1)];
-            double phi_B  = fields.phi[get_idx(x, y - 1)];
-            double phi_TR = fields.phi[get_idx(x + 1, y + 1)];
-            double phi_TL = fields.phi[get_idx(x - 1, y + 1)];
-            double phi_BR = fields.phi[get_idx(x + 1, y - 1)];
-            double phi_BL = fields.phi[get_idx(x - 1, y - 1)];
+            double phi_R  = fields.phi[get_idx(x + 1, y, cfg.NX)];
+            double phi_L  = fields.phi[get_idx(x - 1, y, cfg.NX)];
+            double phi_T  = fields.phi[get_idx(x, y + 1, cfg.NX)];
+            double phi_B  = fields.phi[get_idx(x, y - 1, cfg.NX)];
+            double phi_TR = fields.phi[get_idx(x + 1, y + 1, cfg.NX)];
+            double phi_TL = fields.phi[get_idx(x - 1, y + 1, cfg.NX)];
+            double phi_BR = fields.phi[get_idx(x + 1, y - 1, cfg.NX)];
+            double phi_BL = fields.phi[get_idx(x - 1, y - 1, cfg.NX)];
 
             double dx_phi = (1.0 / 6.0) * (2.0 * (phi_R - phi_L) + (phi_TR + phi_BR) - (phi_TL + phi_BL));
             double dy_phi = (1.0 / 6.0) * (2.0 * (phi_T - phi_B) + (phi_TR + phi_TL) - (phi_BR + phi_BL));
             double lap_phi = (1.0 / 6.0) * (4.0 * (phi_R + phi_L + phi_T + phi_B) +
                                             1.0 * (phi_TR + phi_TL + phi_BR + phi_BL) - 20.0 * phi_c);
 
-            double mu_c = 4.0 * BETA * phi_c * (phi_c * phi_c - 1.0) - KAPPA * lap_phi;
+            double mu_c = 4.0 * cfg.BETA * phi_c * (phi_c * phi_c - 1.0) - cfg.KAPPA * lap_phi;
             Fx += mu_c * dx_phi;
             Fy += mu_c * dy_phi;
 
-            // =========================================================
-            // B. FORÇA MAGNÉTICA DE KELVIN (Estêncil Isotrópico)
-            // =========================================================
             double psi_c = fields.psi[idx];
-            double psi_R = fields.psi[get_idx(x + 1, y)];
-            double psi_L = fields.psi[get_idx(x - 1, y)];
-            double psi_T = fields.psi[get_idx(x, y + 1)];
-            double psi_B = fields.psi[get_idx(x, y - 1)];
-            double psi_TR = fields.psi[get_idx(x + 1, y + 1)];
-            double psi_TL = fields.psi[get_idx(x - 1, y + 1)];
-            double psi_BR = fields.psi[get_idx(x + 1, y - 1)];
-            double psi_BL = fields.psi[get_idx(x - 1, y - 1)];
+            double psi_R = fields.psi[get_idx(x + 1, y, cfg.NX)];
+            double psi_L = fields.psi[get_idx(x - 1, y, cfg.NX)];
+            double psi_T = fields.psi[get_idx(x, y + 1, cfg.NX)];
+            double psi_B = fields.psi[get_idx(x, y - 1, cfg.NX)];
+            double psi_TR = fields.psi[get_idx(x + 1, y + 1, cfg.NX)];
+            double psi_TL = fields.psi[get_idx(x - 1, y + 1, cfg.NX)];
+            double psi_BR = fields.psi[get_idx(x + 1, y - 1, cfg.NX)];
+            double psi_BL = fields.psi[get_idx(x - 1, y - 1, cfg.NX)];
 
             double hx = -(1.0 / 6.0) * (2.0 * (psi_R - psi_L) + (psi_TR + psi_BR) - (psi_TL + psi_BL));
             double hy = -(1.0 / 6.0) * (2.0 * (psi_T - psi_B) + (psi_TR + psi_TL) - (psi_BR + psi_BL));
@@ -76,11 +68,8 @@ __global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_o
             Fy += chi * (hx * (-d2psi_dxy) + hy * (-d2psi_dy2));
         }
 
-        // =========================================================
-        // C. MACROSCÓPICA E OPERADOR DE COLISÃO
-        // =========================================================
         double S_inv = fmax(0.0, fmin(1.0, (phi_c + 1.0) * 0.5));
-        double tau = TAU_OUT + (TAU_IN - TAU_OUT) * S_inv;
+        double tau = cfg.TAU_OUT + (cfg.TAU_IN - cfg.TAU_OUT) * S_inv;
         double omega = 1.0 / tau;
         double nu_local = (tau - 0.5) / 3.0;
 
@@ -99,7 +88,6 @@ __global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_o
             uy_l += f[i] * CY[i];
         }
 
-        // Correção de Guo para momento físico
         double ux_star = (ux_l + 0.5 * Fx) / rho_l;
         double uy_star = (uy_l + 0.5 * Fy) / rho_l;
 
@@ -127,12 +115,10 @@ __global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_o
             int be_x = x + CX[i];
             int be_y = y + CY[i];
 
-            // Avaliação Topológica
-            if (be_y >= 0 && be_y < NY) {
-                if (IS_PERIODIC) {
-                    // Mapeamento Periódico de Fronteira (Validação Analítica)
-                    int stream_x = (be_x + NX) % NX;
-                    int stream_idx = get_idx(stream_x, be_y);
+            if (be_y >= 0 && be_y < cfg.NY) {
+                if (cfg.IS_PERIODIC) {
+                    int stream_x = (be_x + cfg.NX) % cfg.NX;
+                    int stream_idx = get_idx(stream_x, be_y, cfg.NX);
 
                     if(i==0) f_out.f0[stream_idx] = f_post;
                     else if(i==1) f_out.f1[stream_idx] = f_post;
@@ -144,10 +130,8 @@ __global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_o
                     else if(i==7) f_out.f7[stream_idx] = f_post;
                     else if(i==8) f_out.f8[stream_idx] = f_post;
                 } else {
-                    // Mapeamento Truncado de Fronteira Aberta (Produção)
-                    if (be_x >= 0 && be_x < NX) {
-                        int stream_idx = get_idx(be_x, be_y);
-
+                    if (be_x >= 0 && be_x < cfg.NX) {
+                        int stream_idx = get_idx(be_x, be_y, cfg.NX);
                         if(i==0) f_out.f0[stream_idx] = f_post;
                         else if(i==1) f_out.f1[stream_idx] = f_post;
                         else if(i==2) f_out.f2[stream_idx] = f_post;
@@ -160,7 +144,6 @@ __global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_o
                     }
                 }
             } else {
-                // Condição Ortogonal de Bounce-Back para as Paredes
                 int opp = OPP[i];
                 if(opp==0) f_out.f0[idx] = f_post;
                 else if(opp==1) f_out.f1[idx] = f_post;

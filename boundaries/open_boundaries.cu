@@ -1,19 +1,13 @@
-// boundaries/open_boundaries.cu
 #include "open_boundaries.cuh"
 #include <cuda_runtime.h>
 
-__global__ void open_boundaries_kernel(LBM_Populations f_out, Macro_Fields fields) {
-    // Topologia 1D (percorre apenas o eixo Y)
+__global__ void open_boundaries_kernel(LBM_Populations f_out, Macro_Fields fields, SimConfig cfg) {
     int y = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (y < NY) {
-
-        // =========================================================
-        // 1. OUTLET (x = NX - 1) -> Extrapolação Convectiva
-        // =========================================================
-        int idx_out   = y * NX + (NX - 1);
-        int idx_out_1 = y * NX + (NX - 2);
-        int idx_out_2 = y * NX + (NX - 3);
+    if (y < cfg.NY) {
+        int idx_out   = y * cfg.NX + (cfg.NX - 1);
+        int idx_out_1 = y * cfg.NX + (cfg.NX - 2);
+        int idx_out_2 = y * cfg.NX + (cfg.NX - 3);
 
         f_out.f0[idx_out] = 2.0 * f_out.f0[idx_out_1] - f_out.f0[idx_out_2];
         f_out.f1[idx_out] = 2.0 * f_out.f1[idx_out_1] - f_out.f1[idx_out_2];
@@ -25,20 +19,14 @@ __global__ void open_boundaries_kernel(LBM_Populations f_out, Macro_Fields field
         f_out.f7[idx_out] = 2.0 * f_out.f7[idx_out_1] - f_out.f7[idx_out_2];
         f_out.f8[idx_out] = 2.0 * f_out.f8[idx_out_1] - f_out.f8[idx_out_2];
 
-        // =========================================================
-        // 2. INLET (x = 0) -> Dirichlet em Velocidade via Equilíbrio
-        // =========================================================
-        int idx_in = y * NX + 0;
-        int idx_in_ref = y * NX + 1; // Nó interior imediato para capturar o gradiente de pressão
+        int idx_in = y * cfg.NX + 0;
+        int idx_in_ref = y * cfg.NX + 1;
 
-        // Extrapola a densidade do nó interior para permitir a formação natural do campo de Darcy
         double rho_inlet = fields.rho[idx_in_ref];
+        double u_sq = cfg.U_INLET * cfg.U_INLET;
 
-        double u_sq = U_INLET * U_INLET;
-
-        // Forçamento do estado populacional para u = [U_INLET, 0]
         for (int i = 0; i < 9; ++i) {
-            double cu_in = CX[i] * U_INLET; // O vetor CY é 0 para o Inlet horizontal
+            double cu_in = CX[i] * cfg.U_INLET;
             double feq_in = W_LBM[i] * rho_inlet * (1.0 + 3.0 * cu_in + 4.5 * cu_in * cu_in - 1.5 * u_sq);
 
             if (i == 0) f_out.f0[idx_in] = feq_in;
@@ -54,11 +42,8 @@ __global__ void open_boundaries_kernel(LBM_Populations f_out, Macro_Fields field
     }
 }
 
-// Orquestrador Host
-void apply_open_boundaries(LBM_Populations d_f_out, Macro_Fields d_fields, int NY_dim) {
+void apply_open_boundaries(LBM_Populations d_f_out, Macro_Fields d_fields, int NY_dim, SimConfig cfg) {
     int threadsPerBlock = 256;
     int blocksPerGrid = (NY_dim + threadsPerBlock - 1) / threadsPerBlock;
-
-    open_boundaries_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_f_out, d_fields);
-    // Sincronização dispensada temporariamente aqui se o próximo passo não for leitura síncrona
+    open_boundaries_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_f_out, d_fields, cfg);
 }
