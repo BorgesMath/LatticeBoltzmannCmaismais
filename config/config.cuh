@@ -11,18 +11,22 @@ constexpr double PI = 3.14159265358979323846;
 // =========================================================
 // 1. PARÂMETROS DE SIMULAÇÃO E TOPOLOGIA
 // =========================================================
-constexpr int NX = 14400;
-constexpr int NY = 2400;
+constexpr int NX = 4000;
+constexpr int NY = 2000;
 constexpr int NUM_NODES = NX * NY;
 constexpr int SNAPSHOT_STEPS = 60;
 
 // =========================================================
 // 2. HIDRODINÂMICA E CINEMÁTICA
 // =========================================================
-constexpr double TAU_IN = 3.0;
-constexpr double TAU_OUT = 3.0;
-constexpr double U_INLET = 0.005;
-constexpr double K_0 = 4000.0;
+constexpr double TAU_IN = 0.6;
+constexpr double TAU_OUT = 1.5;
+constexpr double U_INLET = 0.05;
+constexpr double K_0 = 40.0;
+
+//a janela ótima de convergência e estabilidade
+//para o tempo de relaxação localiza-se no
+//intervalo $0.6 \leq \tau \leq 1.5$
 
 // =========================================================
 // 3. TERMODINÂMICA DE INTERFACE (CAHN-HILLIARD)
@@ -76,5 +80,12 @@ struct Macro_Fields {
     // Campos Macro e Magnetostática:
     double *psi, *rho, *ux, *uy, *chi_field, *K_field;
 };
+
+
+// =========================================================
+// 8. CONTROLE TOPOLÓGICO E FORÇAMENTO EXTERNO
+// =========================================================
+constexpr double BODY_FORCE_X = 0.0; // Aceleração universal de volume (0.0 se forçado apenas via Inlet/Dirichlet)
+constexpr bool IS_PERIODIC = true;   // true para topologia de malha periódica (validação LSA), false para domínio truncado
 
 #endif // CONFIG_CUH
