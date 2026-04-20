@@ -29,23 +29,25 @@ __global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_o
         if (x > 0 && x < NX - 1 && y > 0 && y < NY - 1) {
 
             // =========================================================
-            // A. FORÇA DE KORTEWEG (Réplica exata do lbm.py)
+            // A. FORÇA DE KORTEWEG (Balanceada e Isotrópica)
             // =========================================================
+            double mu_c = fields.mu[idx];
+
             double phi_R  = fields.phi[get_idx(x + 1, y)];
             double phi_L  = fields.phi[get_idx(x - 1, y)];
             double phi_T  = fields.phi[get_idx(x, y + 1)];
             double phi_B  = fields.phi[get_idx(x, y - 1)];
+            double phi_TR = fields.phi[get_idx(x + 1, y + 1)];
+            double phi_TL = fields.phi[get_idx(x - 1, y + 1)];
+            double phi_BR = fields.phi[get_idx(x + 1, y - 1)];
+            double phi_BL = fields.phi[get_idx(x - 1, y - 1)];
 
-            // Derivada Central Simples (D2Q5) DEPOIS MELHORAR
-            double dx_phi = 0.5 * (phi_R - phi_L);
-            double dy_phi = 0.5 * (phi_T - phi_B);
+            // Gradiente D2Q9 Exato
+            double dx_phi = (1.0 / 12.0) * (4.0 * (phi_R - phi_L) + (phi_TR + phi_BR) - (phi_TL + phi_BL));
+            double dy_phi = (1.0 / 12.0) * (4.0 * (phi_T - phi_B) + (phi_TR + phi_TL) - (phi_BR + phi_BL));
 
-            // Laplaciano Simples
-            double lap_phi = phi_R + phi_L + phi_T + phi_B - 4.0 * phi_c;
-
-            double mu_local = 4.0 * BETA * phi_c * (phi_c * phi_c - 1.0) - KAPPA * lap_phi;
-            Fx += mu_local * dx_phi;
-            Fy += mu_local * dy_phi;
+            Fx += mu_c * dx_phi;
+            Fy += mu_c * dy_phi;
 
             // =========================================================
             // B. FORÇA MAGNÉTICA DE KELVIN

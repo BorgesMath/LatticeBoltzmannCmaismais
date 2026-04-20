@@ -33,19 +33,20 @@ constexpr double BODY_FORCE_X = 0; // Fx constante. Deixe 0.0 para Saffman-Taylo
 
 
 
+
 // =========================================================
 // 3. TERMODINÂMICA DE INTERFACE (CAHN-HILLIARD)
 // =========================================================
-constexpr double M_MOBILITY = 0.002;  // Igual ao Python
-constexpr int CH_SUBSTEPS = 10;       // Igual ao Python (Estabilidade)
+constexpr double M_MOBILITY = 0.002;
+constexpr int CH_SUBSTEPS = 10;
 constexpr double DT_CH = 1.0 / (double)CH_SUBSTEPS;
 
-constexpr double SIGMA = 0.0001;      // Tensão segura e estável
-constexpr double INTERFACE_WIDTH = 3.0;
+constexpr double SIGMA = 0.0001;
+constexpr double INTERFACE_WIDTH = 4.0; // Interface espessa suprime correntes espúrias
 
-// O compilador fará as contas em tempo de compilação
-constexpr double BETA = 3.0 * SIGMA * INTERFACE_WIDTH / 4.0;
-constexpr double KAPPA = 3.0 * SIGMA * INTERFACE_WIDTH / 8.0;
+// CORREÇÃO: Fórmulas rigorosas de Ginzburg-Landau
+constexpr double BETA = (3.0 * SIGMA) / (8.0 * INTERFACE_WIDTH);
+constexpr double KAPPA = (3.0 * SIGMA * INTERFACE_WIDTH) / 4.0;
 
 
 // =========================================================

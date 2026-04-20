@@ -76,8 +76,8 @@ __global__ void update_cahn_hilliard_kernel(Macro_Fields fields) {
         double phi_BR = fields.phi[yB * NX + xR];
         double phi_BL = fields.phi[yB * NX + xL];
 
-        double dx_phi = (1.0 / 6.0) * (2.0 * (phi_R - phi_L) + (phi_TR + phi_BR) - (phi_TL + phi_BL));
-        double dy_phi = (1.0 / 6.0) * (2.0 * (phi_T - phi_B) + (phi_TR + phi_TL) - (phi_BR + phi_BL));
+        double dx_phi = (1.0 / 12.0) * (4.0 * (phi_R - phi_L) + (phi_TR + phi_BR) - (phi_TL + phi_BL));
+        double dy_phi = (1.0 / 12.0) * (4.0 * (phi_T - phi_B) + (phi_TR + phi_TL) - (phi_BR + phi_BL));
 
         double ux = fields.ux[idx];
         double uy = fields.uy[idx];
