@@ -36,7 +36,7 @@ __global__ void lbm_collide_and_stream(LBM_Populations f_in, LBM_Populations f_o
             double phi_T  = fields.phi[get_idx(x, y + 1)];
             double phi_B  = fields.phi[get_idx(x, y - 1)];
 
-            // Derivada Central Simples (D2Q5)
+            // Derivada Central Simples (D2Q5) DEPOIS MELHORAR
             double dx_phi = 0.5 * (phi_R - phi_L);
             double dy_phi = 0.5 * (phi_T - phi_B);
 

@@ -7,9 +7,8 @@ import matplotlib.pyplot as plt
 BASE_DIR = r"C:\Users\mathe\CLionProjects\LatticeBoltzmann\cmake-build-release"
 
 # Baseado nos parâmetros atuais do seu config.cuh
-BETA = 0.005
-KAPPA = 0.04
-SIGMA_THEO = (4.0 * np.sqrt(2.0) / 3.0) * np.sqrt(KAPPA * BETA)
+
+SIGMA_THEO = 0.001
 
 def process_all_results():
     results_dirs = glob.glob(os.path.join(BASE_DIR, "results_*"))

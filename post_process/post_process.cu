@@ -55,48 +55,65 @@ std::string init_post_processing() {
 
 void export_vtk(int step, const std::string& out_dir, Macro_Fields d_fields,
                 double* h_phi, double* h_rho, double* h_ux, double* h_uy) {
-
     size_t mem_size = NUM_NODES * sizeof(double);
 
-    // Transferência Síncrona Device-to-Host (D2H)
     cudaMemcpy(h_phi, d_fields.phi, mem_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(h_rho, d_fields.rho, mem_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(h_ux, d_fields.ux, mem_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(h_uy, d_fields.uy, mem_size, cudaMemcpyDeviceToHost);
 
-    // Formatação do nome do arquivo (ex: data_000120.vtk)
-    std::stringstream ss;
-    ss << out_dir << "/data_" << std::setfill('0') << std::setw(6) << step << ".vtk";
-    std::ofstream vtk(ss.str());
+    char filename[256];
+    sprintf(filename, "%s/data_%06d.vtk", out_dir.c_str(), step);
 
-    if (vtk.is_open()) {
-        // Cabeçalho VTK Legacy
-        vtk << "# vtk DataFile Version 3.0\n";
-        vtk << "LBM_Multiphase_Magnetic_Data\n";
-        vtk << "ASCII\n";
-        vtk << "DATASET STRUCTURED_POINTS\n";
-        vtk << "DIMENSIONS " << NX << " " << NY << " 1\n";
-        vtk << "ORIGIN 0 0 0\n";
-        vtk << "SPACING 1 1 1\n";
-        vtk << "POINT_DATA " << NUM_NODES << "\n";
+    std::ofstream file(filename);
+    if (!file.is_open()) return;
 
-        // Escalar: Parâmetro de Ordem (Fase)
-        vtk << "SCALARS phi double 1\n";
-        vtk << "LOOKUP_TABLE default\n";
-        for (int i = 0; i < NUM_NODES; ++i) vtk << h_phi[i] << "\n";
+    // A MÁGICA: Gravar o ficheiro com precisão científica absoluta de 15 casas!
+    file << std::scientific << std::setprecision(15);
 
-        // Escalar: Densidade Macroscópica
-        vtk << "SCALARS rho double 1\n";
-        vtk << "LOOKUP_TABLE default\n";
-        for (int i = 0; i < NUM_NODES; ++i) vtk << h_rho[i] << "\n";
+    file << "# vtk DataFile Version 3.0\n";
+    file << "LBM Data\n";
+    file << "ASCII\n";
+    file << "DATASET RECTILINEAR_GRID\n";
+    file << "DIMENSIONS " << NX << " " << NY << " 1\n";
 
-        // Vetor: Campo de Velocidade Físico
-        vtk << "VECTORS velocity double\n";
-        for (int i = 0; i < NUM_NODES; ++i) vtk << h_ux[i] << " " << h_uy[i] << " 0.0\n";
+    file << "X_COORDINATES " << NX << " int\n";
+    for (int i = 0; i < NX; ++i) file << i << " "; file << "\n";
+    file << "Y_COORDINATES " << NY << " int\n";
+    for (int j = 0; j < NY; ++j) file << j << " "; file << "\n";
+    file << "Z_COORDINATES 1 int\n0\n";
 
-        vtk.close();
+    file << "POINT_DATA " << NUM_NODES << "\n";
+
+    file << "SCALARS rho double 1\nLOOKUP_TABLE default\n";
+    for (int j = 0; j < NY; ++j) {
+        for (int i = 0; i < NX; ++i) {
+            file << h_rho[j * NX + i] << "\n";
+        }
     }
+
+    file << "SCALARS phi double 1\nLOOKUP_TABLE default\n";
+    for (int j = 0; j < NY; ++j) {
+        for (int i = 0; i < NX; ++i) {
+            file << h_phi[j * NX + i] << "\n";
+        }
+    }
+
+    file << "VECTORS velocity double\n";
+    for (int j = 0; j < NY; ++j) {
+        for (int i = 0; i < NX; ++i) {
+            int idx = j * NX + i;
+            file << h_ux[idx] << " " << h_uy[idx] << " 0.0\n";
+        }
+    }
+
+    file.close();
 }
+
+
+
+
+
 
 // (Mantenha as funções init_post_processing e export_vtk intactas)
 
