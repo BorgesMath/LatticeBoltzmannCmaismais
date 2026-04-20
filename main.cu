@@ -185,34 +185,58 @@ void run_simulation_case(const SimConfig& cfg) {
     double omega_num_sum = 0.0;
     int omega_samples = 0;
 
+    // ---------------------------------------------------------
+    // RELACAO DE DISPERSAO ANALITICA (LSA) CORRIGIDA
+    // ---------------------------------------------------------
     double k_wave = (2.0 * PI * cfg.MODE_M) / (double)cfg.NY;
-    double omega_base = (k_wave * cfg.U_INLET * (cfg.TAU_OUT - cfg.TAU_IN) / 3.0) - (cfg.SIGMA * pow(k_wave, 3));
-    double omega_theo = omega_base;
+
+    double nu_in = (cfg.TAU_IN - 0.5) / 3.0;   // mu_1
+    double nu_out = (cfg.TAU_OUT - 0.5) / 3.0; // mu_2
+
+    // Denominador da Lei de Darcy (Resistencia Viscosa)
+    double den = (nu_in / cfg.K_0) + (nu_out / cfg.K_0);
+
+    // Forcamento Viscoso pelo Inlet e amortecimento Capilar
+    double viscous_forcing = (cfg.U_INLET / cfg.K_0) * (nu_out - nu_in);
+    double capillary_forcing = cfg.SIGMA * k_wave * k_wave;
+
+    double omega_base = (k_wave / den) * (viscous_forcing - capillary_forcing);
+
+    // Termo Magnetico Deduzido da LSA
+    double termo_magnetico = 0.0;
+
+    double omega_theo = omega_base + termo_magnetico;
+    // ---------------------------------------------------------
+
+    // Limites de controle para extracao do regime linear
+    double lambda = (double)cfg.NY / cfg.MODE_M;
+    double max_linear_amplitude = 0.1 * lambda;
+    bool in_linear_regime = true;
 
     for (int t = 0; t <= max_iter; ++t) {
-        // Enfileiramento direto na fila assíncrona (Stream 0) sem interrupções à CPU
+
         solve_cahn_hilliard(d_fields, numBlocks, threadsPerBlock, cfg);
         update_susceptibility_kernel<<<numBlocks, threadsPerBlock>>>(d_fields, chi_max, cfg);
         solve_poisson_magnetic(d_fields, numBlocks, threadsPerBlock, cfg);
         lbm_collide_and_stream<<<numBlocks, threadsPerBlock>>>(d_f_in, d_f_out, d_fields, cfg);
         apply_open_boundaries(d_f_out, d_fields, cfg.NY, cfg);
 
-        // O(1) Swapping no host
         swap_populations(&d_f_in, &d_f_out);
 
-        // Bloqueio do barramento confinado ao snapshot
         if (t % cfg.SNAPSHOT_STEPS == 0) {
-            // O cudaMemcpy invocado por export_vtk atuará como uma barreira de sincronização implicita,
-            // garantindo que todos os kernels pendentes até o ciclo "t" finalizem antes do dump do arquivo.
             export_vtk(t, output_dir, d_fields, h_phi, h_rho, h_ux, h_uy, cfg);
 
             double current_amplitude = calculate_amplitude(h_phi, cfg);
 
             if (t > 0 && current_amplitude > 0 && prev_amplitude > 0) {
                 omega_num = log(current_amplitude / prev_amplitude) / cfg.SNAPSHOT_STEPS;
-                if (t > max_iter * 0.1) {
+
+                // Extracao estrita durante o crescimento linear exponencial
+                if (t > 500 && current_amplitude < max_linear_amplitude) {
                     omega_num_sum += omega_num;
                     omega_samples++;
+                } else if (current_amplitude >= max_linear_amplitude) {
+                    in_linear_regime = false;
                 }
             }
             prev_amplitude = current_amplitude;
