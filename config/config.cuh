@@ -46,8 +46,15 @@ struct LBM_Populations {
     double *f0, *f1, *f2, *f3, *f4, *f5, *f6, *f7, *f8;
 };
 
+struct LBM_Populations_Phase {
+    double *g0, *g1, *g2, *g3, *g4, *g5, *g6, *g7, *g8;
+};
+// As funções alocadoras no main.cu devem replicar a mesma topologia das populações f_i
+
 struct Macro_Fields {
     double *phi, *phi_new, *mu, *psi, *rho, *ux, *uy, *chi_field, *K_field;
 };
+
+
 
 #endif // CONFIG_CUH

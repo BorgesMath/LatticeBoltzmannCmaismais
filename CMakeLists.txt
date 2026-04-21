@@ -33,7 +33,6 @@ FetchContent_MakeAvailable(json)
 add_executable(LatticeBoltzmann
         main.cu
         initialization/initialization.cu
-        multiphase/cahn_hilliard.cu
         Magnetismo/poisson.cu
         boundaries/open_boundaries.cu
         post_process/post_process.cu
