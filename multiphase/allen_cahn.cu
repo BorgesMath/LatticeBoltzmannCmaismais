@@ -61,21 +61,29 @@ __global__ void lbm_collide_and_stream_phase(LBM_Populations_Phase g_in, LBM_Pop
             dy_phi = (1.0 / 3.0) * (fields.phi[T] - fields.phi[B]) + (1.0 / 12.0) * (fields.phi[TR] + fields.phi[TL] - fields.phi[BR] - fields.phi[BL]);
         }
 
-        // Operador Conservativo de Allen-Cahn (Zheng et al.)
-        double grad_mag = sqrt(dx_phi * dx_phi + dy_phi * dy_phi) + 1e-12;
-        double nx = dx_phi / grad_mag;
-        double ny = dy_phi / grad_mag;
-
         double M = cfg.M_MOBILITY;
-        double D_lbm = 1.0 / 6.0; // Fixo para tau_g = 1.0
         double W = cfg.INTERFACE_WIDTH;
 
-        // Força compressiva termodinâmica
+        // Acoplamento intrínseco da difusão LBM à mobilidade Allen-Cahn
+        double tau_g = 0.5 + 3.0 * M;
+        double omega_g = 1.0 / tau_g;
+
+        double grad_mag = sqrt(dx_phi * dx_phi + dy_phi * dy_phi);
+        double nx = 0.0;
+        double ny = 0.0;
+
+        // Filtro de ruído no bulk para evitar overshoot e acúmulo de phi
+        if (grad_mag > 1e-6) {
+            nx = dx_phi / grad_mag;
+            ny = dy_phi / grad_mag;
+        }
+
+        // Fluxo compressivo contido estritamente na interface
         double compress_factor = M * (2.0 * fmax(1.0 - phi_c * phi_c, 0.0)) / W;
 
-        // Fluxo Q injetado anula a difusão da malha e aplica a mobilidade e compressão de Allen-Cahn
-        double Qx = (M - D_lbm) * dx_phi - compress_factor * nx;
-        double Qy = (M - D_lbm) * dy_phi - compress_factor * ny;
+        // Termo explícito injeta puramente a compressão geométrica
+        double Qx = -compress_factor * nx;
+        double Qy = -compress_factor * ny;
 
         double g[9];
         g[0] = g_in.g0[idx]; g[1] = g_in.g1[idx]; g[2] = g_in.g2[idx];
@@ -85,13 +93,13 @@ __global__ void lbm_collide_and_stream_phase(LBM_Populations_Phase g_in, LBM_Pop
         for (int i = 0; i < 9; ++i) {
             double cu = CX[i] * ux + CY[i] * uy;
 
-            // Equilíbrio Termodinâmico Estrito (Sem gambiarras acústicas)
+            // Equilíbrio LBM com acoplamento convectivo
             double geq = W_LBM[i] * phi_c * (1.0 + 3.0 * cu + 4.5 * cu * cu - 1.5 * usq);
 
-            // Injeção de Fluxo Macroscópico (1.5 = 0.5 * 3.0 para tau=1.0)
-            double Si = 1.5 * W_LBM[i] * (CX[i] * Qx + CY[i] * Qy);
+            // Termo fonte corrigido analiticamente via Chapman-Enskog (tau_g embutido)
+            double Si = (1.0 - 0.5 * omega_g) * 3.0 * W_LBM[i] * (CX[i] * Qx + CY[i] * Qy);
 
-            double g_post = g[i] * 0.0 + 1.0 * geq + Si; // tau_g = 1.0 -> omega = 1.0
+            double g_post = g[i] * (1.0 - omega_g) + omega_g * geq + Si;
 
             int be_x = x + CX[i];
             int be_y = y + CY[i];

@@ -150,7 +150,7 @@ void run_simulation_case(const SimConfig& cfg) {
     std::string output_dir = init_post_processing(cfg);
 
     std::ofstream csv_file(output_dir + "/growth_history.csv");
-    csv_file << "TimeStep,Amplitude,Omega_Num\n";
+    csv_file << "TimeStep,Amplitude,Omega_Num,Mass,PhiMin,PhiMax\n";
 
     dim3 threadsPerBlock(16, 16);
     dim3 numBlocks((cfg.NX + threadsPerBlock.x - 1) / threadsPerBlock.x,
@@ -181,7 +181,6 @@ void run_simulation_case(const SimConfig& cfg) {
 
     int max_iter = 10000;
     double chi_max = 1.2;
-    double tau_g = 1.0;
 
     double prev_amplitude = cfg.INITIAL_AMPLITUDE;
     double omega_num = 0.0;
@@ -204,19 +203,15 @@ void run_simulation_case(const SimConfig& cfg) {
     bool in_linear_regime = true;
 
     for (int t = 0; t <= max_iter; ++t) {
-        // 1. Termodinâmica e Evolução de Fase (Allen-Cahn)
         compute_chemical_potential_kernel<<<numBlocks, threadsPerBlock>>>(d_fields, cfg);
         lbm_collide_and_stream_phase<<<numBlocks, threadsPerBlock>>>(d_g_in, d_g_out, d_fields, cfg);
         update_macroscopic_phase_kernel<<<numBlocks, threadsPerBlock>>>(d_g_out, d_fields, cfg);
 
-        // 2. Susceptibilidade e Campo Magnético
         update_susceptibility_kernel<<<numBlocks, threadsPerBlock>>>(d_fields, chi_max, cfg);
         solve_poisson_magnetic(d_fields, numBlocks, threadsPerBlock, cfg);
 
-        // 3. Navier-Stokes
         lbm_collide_and_stream<<<numBlocks, threadsPerBlock>>>(d_f_in, d_f_out, d_fields, cfg);
 
-        // 4. Fronteiras e Swaps
         apply_open_boundaries(d_f_out, d_g_out, d_fields, cfg.NY, cfg);
 
         swap_populations(&d_f_in, &d_f_out);
@@ -226,9 +221,22 @@ void run_simulation_case(const SimConfig& cfg) {
             export_vtk(t, output_dir, d_fields, h_phi, h_rho, h_ux, h_uy, cfg);
             double current_amplitude = calculate_amplitude(h_phi, cfg);
 
+            // CPU-side reduction da massa para evitar latência CUDA
+            double total_mass = 0.0;
+            double phi_min = h_phi[0];
+            double phi_max = h_phi[0];
+
+            for (int i = 0; i < cfg.NUM_NODES; ++i) {
+                double val = h_phi[i];
+                total_mass += val;
+                if (val < phi_min) phi_min = val;
+                if (val > phi_max) phi_max = val;
+            }
+
             if (t > 0 && current_amplitude > 0 && prev_amplitude > 0) {
                 omega_num = log(current_amplitude / prev_amplitude) / cfg.SNAPSHOT_STEPS;
-                csv_file << t << "," << current_amplitude << "," << std::scientific << omega_num << "\n";
+                csv_file << t << "," << current_amplitude << "," << std::scientific << omega_num
+                         << "," << total_mass << "," << phi_min << "," << phi_max << "\n";
 
                 if (t > 1500 && in_linear_regime) {
                     if (current_amplitude < max_linear_amplitude) {
@@ -237,6 +245,9 @@ void run_simulation_case(const SimConfig& cfg) {
                         in_linear_regime = false;
                     }
                 }
+            } else {
+                csv_file << t << "," << current_amplitude << ",0.0"
+                         << "," << total_mass << "," << phi_min << "," << phi_max << "\n";
             }
             prev_amplitude = current_amplitude;
         }
@@ -262,15 +273,9 @@ void run_simulation_case(const SimConfig& cfg) {
 
     write_simulation_summary(output_dir, omega_theo, 0.0, omega_plateau);
 
-    free(h_phi);
-    free(h_rho);
-    free(h_ux);
-    free(h_uy);
-
-    free_populations(&d_f_in);
-    free_populations(&d_f_out);
-    free_populations_phase(&d_g_in);
-    free_populations_phase(&d_g_out);
+    free(h_phi); free(h_rho); free(h_ux); free(h_uy);
+    free_populations(&d_f_in); free_populations(&d_f_out);
+    free_populations_phase(&d_g_in); free_populations_phase(&d_g_out);
     free_macro_fields(&d_fields);
 }
 
