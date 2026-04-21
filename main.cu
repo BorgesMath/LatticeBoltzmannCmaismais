@@ -15,6 +15,7 @@
 #include "boundaries/open_boundaries.cuh"
 #include "post_process/post_process.cuh"
 #include "lbm/lbm.cuh"
+#include "multiphase/allen_cahn.cuh"
 
 using json = nlohmann::json;
 
@@ -109,10 +110,9 @@ void print_progress_bar(int step, int total, double omega_num, double omega_theo
     int barWidth = 50;
 
     std::cout << "\r[";
-    int pos = barWidth * progress;
     for (int i = 0; i < barWidth; ++i) {
-        if (i < pos) std::cout << "=";
-        else if (i == pos) std::cout << ">";
+        if (i < int(barWidth * progress)) std::cout << "=";
+        else if (i == int(barWidth * progress)) std::cout << ">";
         else std::cout << " ";
     }
     std::cout << "] " << std::setw(3) << int(progress * 100.0) << "% "
@@ -204,19 +204,19 @@ void run_simulation_case(const SimConfig& cfg) {
     bool in_linear_regime = true;
 
     for (int t = 0; t <= max_iter; ++t) {
-
+        // 1. Termodinâmica e Evolução de Fase (Allen-Cahn)
         compute_chemical_potential_kernel<<<numBlocks, threadsPerBlock>>>(d_fields, cfg);
-
-        lbm_collide_and_stream_phase<<<numBlocks, threadsPerBlock>>>(d_g_in, d_g_out, d_fields, tau_g, cfg);
-
+        lbm_collide_and_stream_phase<<<numBlocks, threadsPerBlock>>>(d_g_in, d_g_out, d_fields, cfg);
         update_macroscopic_phase_kernel<<<numBlocks, threadsPerBlock>>>(d_g_out, d_fields, cfg);
 
+        // 2. Susceptibilidade e Campo Magnético
         update_susceptibility_kernel<<<numBlocks, threadsPerBlock>>>(d_fields, chi_max, cfg);
         solve_poisson_magnetic(d_fields, numBlocks, threadsPerBlock, cfg);
 
+        // 3. Navier-Stokes
         lbm_collide_and_stream<<<numBlocks, threadsPerBlock>>>(d_f_in, d_f_out, d_fields, cfg);
 
-        // Inserção do d_g_out como segundo argumento
+        // 4. Fronteiras e Swaps
         apply_open_boundaries(d_f_out, d_g_out, d_fields, cfg.NY, cfg);
 
         swap_populations(&d_f_in, &d_f_out);

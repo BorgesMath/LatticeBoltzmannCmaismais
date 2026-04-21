@@ -5,12 +5,10 @@ __global__ void open_boundaries_kernel(LBM_Populations f_out, LBM_Populations_Ph
     int y = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (y < cfg.NY) {
-        // 1. OUTLET (Saída Direita) - Extrapolação de 2ª Ordem
         int idx_out   = y * cfg.NX + (cfg.NX - 1);
         int idx_out_1 = y * cfg.NX + (cfg.NX - 2);
         int idx_out_2 = y * cfg.NX + (cfg.NX - 3);
 
-        // Hidrodinâmica
         f_out.f0[idx_out] = 2.0 * f_out.f0[idx_out_1] - f_out.f0[idx_out_2];
         f_out.f1[idx_out] = 2.0 * f_out.f1[idx_out_1] - f_out.f1[idx_out_2];
         f_out.f2[idx_out] = 2.0 * f_out.f2[idx_out_1] - f_out.f2[idx_out_2];
@@ -21,26 +19,20 @@ __global__ void open_boundaries_kernel(LBM_Populations f_out, LBM_Populations_Ph
         f_out.f7[idx_out] = 2.0 * f_out.f7[idx_out_1] - f_out.f7[idx_out_2];
         f_out.f8[idx_out] = 2.0 * f_out.f8[idx_out_1] - f_out.f8[idx_out_2];
 
-        // Campo de fase: cópia de 1ª ordem
-        g_out.g0[idx_out] = g_out.g0[idx_out_1];
-        g_out.g1[idx_out] = g_out.g1[idx_out_1];
-        g_out.g2[idx_out] = g_out.g2[idx_out_1];
-        g_out.g3[idx_out] = g_out.g3[idx_out_1];
-        g_out.g4[idx_out] = g_out.g4[idx_out_1];
-        g_out.g5[idx_out] = g_out.g5[idx_out_1];
-        g_out.g6[idx_out] = g_out.g6[idx_out_1];
-        g_out.g7[idx_out] = g_out.g7[idx_out_1];
+        g_out.g0[idx_out] = g_out.g0[idx_out_1]; g_out.g1[idx_out] = g_out.g1[idx_out_1];
+        g_out.g2[idx_out] = g_out.g2[idx_out_1]; g_out.g3[idx_out] = g_out.g3[idx_out_1];
+        g_out.g4[idx_out] = g_out.g4[idx_out_1]; g_out.g5[idx_out] = g_out.g5[idx_out_1];
+        g_out.g6[idx_out] = g_out.g6[idx_out_1]; g_out.g7[idx_out] = g_out.g7[idx_out_1];
         g_out.g8[idx_out] = g_out.g8[idx_out_1];
 
+        fields.phi[idx_out] = fields.phi[idx_out_1];
+        fields.rho[idx_out] = fields.rho[idx_out_1];
+        fields.ux[idx_out]  = fields.ux[idx_out_1];
+        fields.uy[idx_out]  = fields.uy[idx_out_1];
 
-        // 2. INLET (Entrada Esquerda) - Dirichlet Constante
         int idx_in = y * cfg.NX + 0;
-        int idx_in_ref = y * cfg.NX + 1;
-
-        double rho_inlet = fields.rho[idx_in_ref];
+        double rho_inlet = fields.rho[y * cfg.NX + 1];
         double u_sq = cfg.U_INLET * cfg.U_INLET;
-
-        // Em um deslocamento, a face de entrada injeta perpetuamente o fluido deslocador (phi = -1.0)
         double phi_inlet = 1.0;
 
         for (int i = 0; i < 9; ++i) {
@@ -59,6 +51,11 @@ __global__ void open_boundaries_kernel(LBM_Populations f_out, LBM_Populations_Ph
             else if (i == 7) { f_out.f7[idx_in] = feq_in; g_out.g7[idx_in] = geq_in; }
             else if (i == 8) { f_out.f8[idx_in] = feq_in; g_out.g8[idx_in] = geq_in; }
         }
+
+        fields.phi[idx_in] = phi_inlet;
+        fields.rho[idx_in] = rho_inlet;
+        fields.ux[idx_in]  = cfg.U_INLET;
+        fields.uy[idx_in]  = 0.0;
     }
 }
 
